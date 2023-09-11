@@ -6,6 +6,13 @@
 # and the guidelines for minimal Python package structure at
 # https://python-packaging.readthedocs.io/en/latest/minimal.html
 
+
+# =========================================================================
+
+
+from .sph_zonal_mean import sph_zonal_mean
+from .tem_diagnostics import TEMDiagnostics
+
 # define attributes
 __version__ = '0.1'
 __author__ = 'Joe Hollowed <hollowed@umich.gov>'
