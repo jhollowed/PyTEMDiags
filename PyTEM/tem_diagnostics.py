@@ -103,16 +103,9 @@ class TEMDiagnostics:
         self.zm_dlat   = zm_dlat  # zonal mean discretization spacing [deg]
         self.log_pres  = log_pres # log pressure bool flag
         
-        # ---- handle dimensions of input data, generate coordinate arrays
-        self.handle_dims()
-        
-        # ---- get remap matrices
-        self.logger.print('Getting zonal averaging matrices...')
-        self.Z, self.Zp = sph_zonal_mean(self.lat, self.L, zm_lat, grid_name, zm_grid_name, 
-                                         map_save_dest, overwrite_map)
-        
         # ---- declare new fields
-        self.theta = None      # potential temperature, in [K]
+        self.zm_lat = None     # zonal mean latitude set [deg]
+        self.theta = None      # potential temperature [K]
         self.up = None         # "u-prime", zonally asymmetric anomaly in ua
         self.vp = None         # "v-prime", zonally asymmetric anomaly in va
         self.wapp = None       # "wap-prime", zonally asymmetric anomaly in wap
@@ -136,6 +129,14 @@ class TEMDiagnostics:
         self._utendepfd = None # tendency of eastward wind due to EP flux divergence [m/s]
         self._utendvtem = None # tendency of eastward wind due to TEM northward wind advection + coriolis [m/s]
         self._utendwtem = None # tendency of eastward wind due to TEM upward wind advection [m/s]
+         
+        # ---- handle dimensions of input data, generate coordinate arrays
+        self.handle_dims()
+        
+        # ---- construct zonal averaging obeject
+        self.logger.print('Getting zonal averaging matrices...')
+        zm = sph_zonal_averager(self.lat, self.zm_lat, self.L, grid_name, zm_grid_name, map_save_dest)
+        zm.sph_zm_matrices(overwrite_map, self.debug)
         
         # ---- get potential temperature
         self.compute_potential_temperature()
