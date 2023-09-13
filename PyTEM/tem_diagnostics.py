@@ -27,7 +27,7 @@ default_dimnames = {'horz':'ncol', 'vert':'lev', 'time':'time'}
 
 class TEMDiagnostics:
 
-    def __init__(self, ua, va, ta, wap, p, zm_dlat=1, L=50, 
+    def __init__(self, ua, va, ta, wap, p, lat, zm_dlat=1, L=50, 
                  dim_names=default_dims, log_pressure=True, grid_name=None, 
                  zm_grid_name=None, map_save_dest=None, overwrite_map=False, 
                  debug=False):
@@ -46,7 +46,7 @@ class TEMDiagnostics:
             (unstructured spatially 3D), with optional third temporal dimension. The 
             horizontal, vertical, and optional temporal dimensions must be named, with names
             matching those given by the argument 'dim_names'. The expected units of the 
-            coordinates are: lat in degrees, lev in hPa, time in hours.
+            coordinates are: ncol dimensionless, lev in hPa, time in hours.
         va : xarray DataArray
             Northward wind, in m/s.
         ta : xarray DataArray
@@ -55,6 +55,8 @@ class TEMDiagnostics:
             Vertical pressure velocity, in Pa/s.
         p : xarray DataArray
             Air pressure, in Pa.
+        lat : xarray DataArray
+            Latitudes in degrees.
         zm_dlat : float, optional
             Spacing used to generate uniform 1D latitude grid for zonal means, in degrees. 
             Defaults to 1 degree.
@@ -83,9 +85,86 @@ class TEMDiagnostics:
             The 'overwrite' input argument to sph_zonal_mean(). See docstrings therein.
         debug : bool, optional
         
-        Methods
-        -------
+        Public Methods
+        --------------
+        epfy()
+            Returns the northward component of the EP flux in m3/s2.
+        epfz()
+            Returns the upward component of the EP flux in m3s2.
+        epdiv()
+            Returns the EP flux divergence.
+        vtem()
+            Returns the TEM northward wind in m/s.
+        wtem()
+            Returns the TEM upward wind in m/s.
+        psitem()
+            Returns the TEM mass stream function in kg/s.
+        utendepfd()
+            Returns the tendency of eastward wind due to EP flux divergence in m/s2.
+        utendvtem()
+            Returns the tendency of eastward wind due to TEM northward wind advection 
+            and coriolis in m/s2.
+        utendwtem()
+            Returns the tendency of eastward wind due to TEM upward wind advection in m/s2.
         
+        Public Attributes
+        -----------------
+        ZM : sph_zonal_averager object
+            Zonal averager object associated with current configuration.
+        zm_lat : 1D array
+            Zonal mean latitude set in degrees.
+        theta : N-D array
+            Potential temperature in K, matching dims of input ta.
+        up : N-D array
+            "u-prime", zonally asymmetric anomaly in ua in m/s, matching dims of input ua.
+        vp : N-D array
+            "v-prime", zonally asymmetric anomaly in va in m/s, matching dims of input va.
+        wapp : N-D array
+            "wap-prime", zonally asymmetric anomaly in wap in Pa/s, matching dims of 
+            input wap.
+        thetap : N-D array
+            "theta-prime", zonally asymmetric anomaly in K, matching dims of input ta.
+        ub : N-D array
+            "u-bar", zonal mean of ua in m/s, matching length of zm_lat in the horizontral, 
+            otherwise matching dims of input ua.
+        vb : N-D array
+            "v-bar", zonal mean of va in m/s, matching length of zm_lat in the horizontral, 
+            otherwise matching dims of input va.
+        wapb : N-D array
+            "omega-bar", zonal mean of wap in Pa/a, matching length of zm_lat in the 
+            horizontral, otherwise matching dims of input wap.
+        thetab : N-D array
+            "theta-bar", zonal mean of theta in K, matching length of zm_lat in the 
+            horizontral, otherwise matching dims of input ta.
+        pb : N-D array
+            "p-bar", zonal mean of pressure in Pa, matching length of zm_lat in the 
+            horizontral, otherwise matching dims of input p.
+        upvp : N-D array
+            Product of up and vp in m2/s2, aka northward flux of eastward momentum, matching 
+            dims of input ua.
+        upvpb : N-D array
+            Zonal mean of upvp in m2/s2, matching length of zm_lat in the horizontal, 
+            otherwise matching dims of input ua.
+        upwapp : N-D array
+            Product of up and wapp in (m Pa)/s2, aka upward flux of eastward momentum, 
+            matching dims of input ua.
+        upwwappb : N-D array
+            Zonal mean of upwapp in (m Pa)/s2, matching length of zm_lat in the horizontal, 
+            otherwise matching dims of input ua.
+        vptp : N-D array       
+            Product of vp and thetap in (m K)/s, aka northward flux of potential temperature,
+            matching dims of input va.
+        vptpb : N-D array
+            Zonal mean of vptp in (m K)/s, matching length of zm_lat in the horizontal, 
+            otherwise matching dims of input va.
+        f : 1D array
+            Coriolis parameter on native grid.
+        zm_f : 1D array
+            Coriolis parameter on zonal mean grid.
+        coslat : 1D array
+            Cosine of native grid latitude.
+        zm_coslat : 1D array
+            Cosine of zonal mean latitude.
         '''
 
         self.logger = util.logger(debug)
@@ -97,6 +176,7 @@ class TEMDiagnostics:
         self.va   = va   # northward wind [m/s]
         self.ta   = ta   # temperature [K]
         self.wap  = wap  # vertical pressure velocity [Pa/s]
+        self.lat  = lat  # latitudes [deg]
         # options
         self.L         = L        # max. spherical harmonic degree 
         self.debug     = debug    # logging bool flag
@@ -104,54 +184,48 @@ class TEMDiagnostics:
         self.log_pres  = log_pres # log pressure bool flag
         
         # ---- declare new fields
-        self.zm_lat = None     # zonal mean latitude set [deg]
-        self.theta = None      # potential temperature [K]
-        self.up = None         # "u-prime", zonally asymmetric anomaly in ua
-        self.vp = None         # "v-prime", zonally asymmetric anomaly in va
-        self.wapp = None       # "wap-prime", zonally asymmetric anomaly in wap
-        self.thetap = None     # "theta-prime", zonally asymmetric anomaly in theta
-        self.ub = None         # "u-bar", zonal mean of ua
-        self.vb = None         # "v-bar", zonal mean of va
-        self.wapb = None       # "wap-bar", zonal mean of wap
-        self.thetab = None     # "theta-bar", zonal mean of theta
-        self.upvp = None       # product of up and vp, aka northward flux of eastward momentum
-        self.upvpb = None      # zonal mean of upvp
-        self.upwapp = None     # product of up and wp, aka upward flux of eastward momentum
-        self.upwwapb = None    # zonal mean of upwpb
-        self.vptp = None       # product of vp and thetap, aka northward flux of potential temperature
-        self.vptpb = None      # zonal mean of vptpb
-        self._epfy = None      # northward component of the Eliassen-Palm flux [m3/s2] 
-        self._epfz = None      # upward component of the Eliassen-Palm flux [m3/s2]
-        self._epdiv = None     # divergence of the Eliassen-Palm flux (this output not in DynVarMIP)
-        self._vtem = None      # TEM (residual) northward wind [m/s]
-        self._wtem = None      # TEM (residual) upward wind [m/s]
-        self._psitem = None    # TEM mass stream function [kg/s]
-        self._utendepfd = None # tendency of eastward wind due to EP flux divergence [m/s]
-        self._utendvtem = None # tendency of eastward wind due to TEM northward wind advection + coriolis [m/s]
-        self._utendwtem = None # tendency of eastward wind due to TEM upward wind advection [m/s]
+        self.zm_lat    = None # zonal mean latitude set [deg]
+        self.theta     = None # potential temperature [K]
+        self.up        = None # "u-prime", zonally asymmetric anomaly in ua [m/s]
+        self.vp        = None # "v-prime", zonally asymmetric anomaly in va [m/s]
+        self.wapp      = None # "wap-prime", zonally asymmetric anomaly in wap [Pa/s]
+        self.thetap    = None # "theta-prime", zonally asymmetric anomaly in theta [K]
+        self.ub        = None # "u-bar", zonal mean of ua [m/s]
+        self.vb        = None # "v-bar", zonal mean of va [m/s]
+        self.wapb      = None # "wap-bar", zonal mean of wap [Pa/s]
+        self.thetab    = None # "theta-bar", zonal mean of theta [K]
+        self.upvp      = None # product of up and vp, aka northward flux of eastward momentum [m2/s2]
+        self.upvpb     = None # zonal mean of upvp [m2/s2]
+        self.upwapp    = None # product of up and wapp, aka upward flux of eastward momentum [(m Pa)/s2]
+        self.upwwappb  = None # zonal mean of upwapp [(m Pa)/s2]
+        self.vptp      = None # product of vp and thetap, aka northward flux of potential temperature [(m K)/s]
+        self.vptpb     = None # zonal mean of vptp [(m K)/s]
+        self.f         = 2*Om*np.sin(self.lat)    # coriolis parameter on native grid
+        self.zm_f      = 2*Om*np.sin(self.zm_lat) # coriolis parameter on zonal mean grid
+        self.coslat    = np.cos(self.lat)         # cosine of latitude
+        self.zm_coslat = np.cos(self.zm_lat)      # cosine of latitude
          
         # ---- handle dimensions of input data, generate coordinate arrays
-        self.handle_dims()
-        
-        # ---- construct zonal averaging obeject
-        self.logger.print('Getting zonal averaging matrices...')
-        zm = sph_zonal_averager(self.lat, self.zm_lat, self.L, grid_name, zm_grid_name, map_save_dest)
-        zm.sph_zm_matrices(overwrite_map, self.debug)
+        self._handle_dims()
         
         # ---- get potential temperature
-        self.compute_potential_temperature()
-
-        # ---- get zonal means, eddy components
-        self.decompose_zm_eddy()
+        self._compute_potential_temperature()
         
-        # ---- get fluxes
-        self.compute_fluxes()
+        # ---- construct zonal averaging obeject, get zonal means, eddy components
+        self.logger.print('Getting zonal averaging matrices...')
+        self.ZM = sph_zonal_averager(self.lat, self.zm_lat, self.L, 
+                                           grid_name, zm_grid_name, map_save_dest)
+        self._decompose_zm_eddy()
+        
+        # ---- compute fluxes, vertical and meridional derivaties, streamfunction terms
+        self._compute_fluxes()
+        self._compute_derivatives()
 
 
     # --------------------------------------------------
 
 
-    def handle_dims(self):
+    def _handle_dims(self):
         '''
         Checks that input data dimensions are as expected. Adds temporal dimensions if needed.
         Transposes input data such that data shapes are consistent with (ncol, lev, time). Builds
@@ -212,9 +286,9 @@ class TEMDiagnostics:
     # --------------------------------------------------
     
 
-    def compute_potential_temperature():
+    def _compute_potential_temperature():
         '''
-        Computes the potential temperature from temperature and pressure
+        Computes the potential temperature from temperature and pressure.
         '''
         self.theta = self.ta * (p0/self.p)**k
         self.theta.name = 'THETA'
@@ -223,20 +297,53 @@ class TEMDiagnostics:
     # --------------------------------------------------
     
 
-    def decompose_zm_eddy():
+    def _decompose_zm_eddy():
         '''
         Decomposes atmospheric variables into zonal means and eddy components.
         ''' 
-        self.ub =  
+        self.up      = self.ua - self.ZM.sph_zonal_mean_native(self.ua)
+        self.ub      = self.ZM.sph_zonal_mean(self.ua) 
+        self.vp      = self.va - self.ZM.sph_zonal_mean_native(self.va)
+        self.vb      = self.ZM.sph_zonal_mean(self.va) 
+        self.pb      = self.ZM.sph_zonal_mean(self.p) 
+        self.thetap  = self.theta - self.ZM.sph_zonal_mean_native(self.theta)
+        self.thetab  = self.ZM.sph_zonal_mean(self.theta) 
+        self.wapp    = self.wap - self.ZM.sph_zonal_mean_native(self.wap)
+        self.wapb    = self.ZM.sph_zonal_mean(self.wap) 
     
 
     # --------------------------------------------------
     
 
-    def compute_fluxes():
+    def _compute_fluxes():
         '''
-        Computes momentum and potential temperature fluxes, and their zonal averages
+        Computes momentum and potential temperature fluxes, and their zonal averages.
         '''
+        self.upvp     = self.up * self.vp
+        self.upvpb    = self.ZM.sph_zonal_mean(self.upvp)
+        self.upwapp   = self.up * self.wapp
+        self.upwwappb = self.ZM.sph_zonal_mean(upwapp)
+        self.vptp     = self.vp * self.thetap
+        self.vptpb    = self.ZM.sph_zonal_mean(self.vptp)
+    
+
+    # --------------------------------------------------
+    
+
+    def _compute_derivatives():
+        '''
+        Computes vertical and meridional derivatives, and their zonal averages.
+        '''
+        self.dub_dp     = np.gradient(self.ub, self.pb, axis=1)
+        self.dthetab_dp = np.gradient(self.thetab, self.pb, axis=1)
+ 
+        ubcoslat            = self.ub * self.zm_coslat
+        self.dubcoslat_dlat = np.gradient(uVbcoslat, self.zm_lat, axis=0)
+        
+        self.psi             = self.vptpb / self.dthetab_dp 
+        psicoslat            = self.psi * self.zm_coslat
+        self.dpsicoslat_dlat = np.gradient(psicoslat, self.zm_lat, axis=0)
+        self.dpsi_dp         = np.gradient(self.psi, self.pb, axis=1) 
     
 
     # --------------------------------------------------
@@ -245,139 +352,94 @@ class TEMDiagnostics:
     def momentum_budget():
         '''
         Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
         '''
-
-        self.epfy = 
+        pass
     
     # --------------------------------------------------
 
     def epfy():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the northward component of the EP flux in m3/s2.
         '''
+        return self.p/p0 * ( a*self.zm_coslat * (self.dubdp * self.psi - self.dpvpb) )
     
     # --------------------------------------------------
 
     def epfz():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the upward component of the EP flux in m3s2.
         '''
-         pass
+        x = (zm_f - self.dubcoslat_dlat/(a*self.zm_coslat))
+        return -H/p0 * (a*self.zm_coslat * (x*self.psi - self.upwappb) )
     
     # --------------------------------------------------
 
-    def epfz():
+    def epdiv():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the EP flux divergence.
         '''
-         pass
+        Fphi = self.epfy()
+        Fp   = self.epfz()
+        
+        dFphicoslat_dlat = np.gradient(Fphi*self.zm_coslat, self.zm_lat, axis=0)
+        dFp_dp           = np.gradient(Fp, self.pb, axis=1)
+        
+        return dFphicoslat_dlat + dFp_dp
     
     # --------------------------------------------------
 
     def vtem():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the TEM northward wind in m/s.
         '''
-         pass
+        return self.vb - self.dpsi_dp 
     
     # --------------------------------------------------
 
     def wtem():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the TEM upward wind in m/s.
         '''
-         pass
+        return self.wapb + self.dpsicoslat_dlat / (a*self.zm_coslat)
     
     # --------------------------------------------------
 
     def psitem():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the TEM mass stream function in kg/s.
         '''
-        pass
+        intvb_p  = np.trapz(self.vb, self.p, axis=1)
+        return 2*pi*a*self.zm_coslat/g0 * self.intvb_pi
     
     # --------------------------------------------------
  
     def utendepfd():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+            Returns the tendency of eastward wind due to EP flux divergence in m/s2.
         '''
-        pass
+        return self.epdiv() / (a * self.zm_coslat)
+
     
     # --------------------------------------------------
  
     def utendvtem():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the tendency of eastward wind due to TEM northward wind advection 
+        and coriolis in m/s2.
         '''
-         pass
+        vstar = self.vtem()
+        return vstar * (self.zm_f - self.dubcoslat_dlat / (a*self.coslat))
     
     # --------------------------------------------------
 
     def utendwtem():
         '''
-        Desc
-
-        Parameters
-        ----------
-
-        Returns
-        -------
+        Returns the tendency of eastward wind due to TEM upward wind advection in m/s2.
         '''
-        pass
+        wstar = self.wtem
+        return -wstar * self.dub_dp
+        
 
-    
+# =========================================================================
+
+

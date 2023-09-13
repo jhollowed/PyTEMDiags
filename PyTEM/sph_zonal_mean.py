@@ -29,7 +29,7 @@ DEFAULT_LAT_ATTRS = {'long_name':'Latitude of Grid Cell Centers', 'standard_name
 
 class sph_zonal_averager:
     def __init__(self, lat, lat_out, L, grid_name=None, grid_out_name=None, save_dest=None,
-                 ncoldim='ncol'):
+                 ncoldim='ncol', debug=False):
         '''
         This class provides an interface for taking zonal averages of fields provided
         on unstructured datasets on the globe using a spherical harmonic decomposition 
@@ -72,21 +72,23 @@ class sph_zonal_averager:
             Defaults to '../maps' relative to this Python module.
         ncoldim : str, optional
             name of horizontal dimension. Defaults to 'ncol'
+        debug : bool, optional
+            Whether or not to print progress statements to stdout.
 
-        Methods
-        -------
+        Public Methods
+        --------------
         sph_zonal_mean()
             Takes the zonal mean of an input variable on the native grid, returning the 
             zonal mean on the output grid.
         sph_zonal_mean_native()
             Takes the zonal mean of an input variable on the native grid, returning the 
             zonal mean on the native grid.
-        sph_zm_matrices()
+        compute_zm_matrices()
             Generates the zonal "averaging matrix" and "remap matrix"  using spherical harmonic 
             decomposition, given latitudes and degree (L).
 
-        Attributes
-        ----------
+        Public Attributes
+        -----------------
         All input parameters are retained as class attrbiutes with the same name. In addition:
         N : int
             Number of input native grid latitudes.
@@ -110,6 +112,7 @@ class sph_zonal_averager:
         self.grid_out_name = grid_out_name # name of optional output grid
         self.save_dest = save_dest         # save location for matric netcdf files
         self.ncoldim = ncoldim             # name of horizontal dimension for input data
+        self.debug = debug                 # flag for debug print statements
         
         # ---- declare variables
         self.N = len(lat)       # number of input latitudes
@@ -129,6 +132,9 @@ class sph_zonal_averager:
         if(grid_out_name is None):
             grid_out_name = '{}deg'.format(dlat_out)
         self.Zp_file_out = '{}/Zp_{}_{}_L{}.nc'.format(save_dest, grid_out, grid_out_name, L)
+
+        # ---- read remap matrices, if currently exist on file
+        self.compute_sph_matrices(read_only=True)
  
 
     # --------------------------------------------------
@@ -191,7 +197,7 @@ class sph_zonal_averager:
         # (whereas it is conventional for native grid data to have an integer-valued
         # column ncol)
         if(NN == M): 
-            A = A.isel(ncol=M)
+            A = A.isel(ncol=slice(M))
             A = A.rename('ncol', 'lat')
             A.coords['lat'] = self.lat_out
             A.attrs = DEFAULT_LAT_ATTRS
@@ -216,7 +222,7 @@ class sph_zonal_averager:
     # --------------------------------------------------
 
 
-    def sph_zm_matrices(self, overwrite=False, debug=False):
+    def compute_sph_matrices(self, overwrite=False, read_only=False):
         '''
         Generates the zonal "averaging matrix" and "remap matrix"  using spherical harmonic 
         decomposition, given latitudes and degree (L).
@@ -230,8 +236,10 @@ class sph_zonal_averager:
             Whether or not to force re-computation and overwriting, if 
             a filename corresponding to this execution of the function 
             already exists. 
-        debug : bool, optional
-            Whether or not to print progress statements to stdout.
+        read_only : bool, optional
+            If True, only allow this function to load in the matrices from
+            file. If the files don't exist, return rather than computing 
+            them. Defaults to False.
 
         Returns
         -------
@@ -240,7 +248,7 @@ class sph_zonal_averager:
             Zp: The resulting non-square (MxN) zonal averaging remap matrix.
         '''
 
-        logger = util.logger(debug, 'SPH_ZONAL_MEAN')
+        logger = util.logger(self.debug, 'SPH_ZONAL_MEAN')
        
         if(lat_out is not None):
             logger.print('calling sph_zonal_mean for (M x N) = ({} x {}), L = {}'.format(M, N, L))
@@ -256,7 +264,7 @@ class sph_zonal_averager:
             logger.print('Z\' read from file {}'.format(self.Zp_file_out))
             return
         except FileNotFoundError:
-            pass
+            if(return_if_not_exist): return
      
         # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the input lats
         Y0 = np.zeros((self.N, self.L+1))    # matrix to store spherical harmonics on input lats
@@ -309,7 +317,7 @@ class sph_zonal_averager:
         # -- write out Z'
         logger.print('writing Z\' to file {}'.format(self.Z_file_out))
         Zp_da  = xr.DataArray(Zp, dims=('lat_row','lat_col'),
-                                 coords={'lat': self.lat_out, 'lat':self.lat})
+                                 coords={'lat_row': self.lat_out, 'lat_col':self.lat})
         Zp_da.name = 'Zp'
         Zp_da.attrs['long_name'] = 'Remap matrix Z\' for grid {}'.format(self.grid_name)
         Zp_da.to_netcdf(self.Z_file_out)
