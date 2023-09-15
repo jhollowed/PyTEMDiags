@@ -56,7 +56,12 @@ class TEMDiagnostics:
         wap : xarray DataArray
             Vertical pressure velocity, in Pa/s.
         p : xarray DataArray
-            Air pressure, in Pa.
+            Air pressure, in Pa. This variable can either be 1D, matching the length of the 
+            data variables in the vertical dimension, or match the dimensionality of the data.
+            That is, it can either be a vertical coordinate, or be a gridpoint-level value. If
+            a gridpoint-level value, then all derivatives are computed individually per-column,
+            and an extra remapping step id performed to return zonally avergaed quantities, thus 
+            the computations are slower.
         lat : xarray DataArray
             Latitudes in degrees.
         p0 : float
@@ -146,9 +151,6 @@ class TEMDiagnostics:
         thetab : N-D array
             "theta-bar", zonal mean of theta in K, matching length of zm_lat in the 
             horizontral, otherwise matching dims of input ta.
-        pb : N-D array
-            "p-bar", zonal mean of pressure in Pa, matching length of zm_lat in the 
-            horizontral, otherwise matching dims of input p.
         upvp : N-D array
             Product of up and vp in m2/s2, aka northward flux of eastward momentum, matching 
             dims of input ua.
@@ -195,6 +197,8 @@ class TEMDiagnostics:
         self.log_pres       = log_pressure
         self.dim_names      = dim_names
         self.zm_pole_points = zm_pole_points
+        self.ptype          = None # pressure type, either 'coord' or 'var'; 
+                                   # will be set in handle_dims()
         
         # ---- declare new fields
         self.zm_lat    = None # zonal mean latitude set [deg]
@@ -207,15 +211,15 @@ class TEMDiagnostics:
         self.vb        = None # "v-bar", zonal mean of va [m/s]
         self.wapb      = None # "wap-bar", zonal mean of wap [Pa/s]
         self.thetab    = None # "theta-bar", zonal mean of theta [K]
-        self.upvp      = None # product of up and vp, aka northward flux of eastward 
+        self._upvp     = None # product of up and vp, aka northward flux of eastward 
                               # momentum [m2/s2]
-        self.upvpb     = None # zonal mean of upvp [m2/s2]
-        self.upwapp    = None # product of up and wapp, aka upward flux of eastward 
+        self._upvpb    = None # zonal mean of upvp [m2/s2]
+        self._upwapp   = None # product of up and wapp, aka upward flux of eastward 
                               # momentum [(m Pa)/s2]
-        self.upwwappb  = None # zonal mean of upwapp [(m Pa)/s2]
-        self.vptp      = None # product of vp and thetap, aka northward flux of potential 
+        self._upwwappb = None # zonal mean of upwapp [(m Pa)/s2]
+        self._vptp     = None # product of vp and thetap, aka northward flux of potential 
                               # temperature [(m K)/s]
-        self.vptpb     = None # zonal mean of vptp [(m K)/s]
+        self._vptpb    = None # zonal mean of vptp [(m K)/s]
          
         # ---- handle dimensions of input data, generate latitude-based quantities
         self._handle_dims()
@@ -238,6 +242,14 @@ class TEMDiagnostics:
         # ---- compute fluxes, vertical and meridional derivaties, streamfunction terms
         self._compute_fluxes()
         self._compute_derivatives()
+        
+        # ---- set functions for zonal means, zonal mean getter functions
+        if(self.ptype == 'var'):
+            self.zmfunc = self.ZM.sph_zonal_mean_native
+            self.p_gradient = 3dp_gradient 
+        elif(self.ptype == 'coord'):
+            self.zmfunc = self.ZM.sph_zonal_mean
+            self.p_gradient = 1dp_gradient
 
 
     # --------------------------------------------------
@@ -245,9 +257,9 @@ class TEMDiagnostics:
 
     def _handle_dims(self):
         '''
-        Checks that input data dimensions are as expected. Adds temporal dimensions if needed.
-        Transposes input data such that data shapes are consistent with (ncol, lev, time). Builds
-        latitude discretization for zonal means.
+        Checks that input data dimensions are as expected. Adds temporal dimensions 
+        if needed. Transposes input data such that data shapes are consistent with 
+        (ncol, lev, time). Builds latitude discretization for zonal means.
         '''
 
         # ---- get dim names
@@ -257,10 +269,23 @@ class TEMDiagnostics:
         try: self.timedim   = self.dim_names['time']
         except KeyError: self.timedim = DEFAULT_DIMS['time']
         self.data_dims = (self.ncoldim, self.levdim, self.timedim)
-                
+        
         allvars     = {'ua':self.ua, 'va':self.va, 'ta':self.ta, 
-                       'wap':self.wap, 'p':self.p, 'lat':self.lat}
- 
+                       'wap':self.wap, 'lat':self.lat}
+
+        # ---- check if pressure was input as a coordinate (1D) or a variable (>1D)
+        if len(self.p.dims) == 1 and self.p.dims[0] == self.levdim:
+            self.ptype = 'coord'
+        elif self.p.dims == self.ua.dims and self.levdim in self.p.dims:
+            self.ptype == 'var'
+            allvars['p'] == self.p
+        else:
+            raise RuntimeError('pressure p must be input as either a 1D coordinate matching '\
+                               'the vertical dimension of the data in length (currently {}), '\
+                               'or a variable with dimensionality matching the data '\
+                               '(currently {})'.format(
+                                self.ua.shape[self.ua.dims.index(self.levdim)], self.ua.dims))
+            
         # ---- verify dat input format, transform as needed
         for var,dat in allvars.items():
             if(not isinstance(dat, xr.core.dataarray.DataArray)):
@@ -285,8 +310,9 @@ class TEMDiagnostics:
             # dimension of length 1, value 0.
             if(self.timedim not in dat.dims):
                 dat = dat.expand_dims(self.timedim, axis=len(dat.dims))
-                self.logger.print('Expanded variable {} to contain new dimension \'{}\''.format(
-                                                                              var, self.timedim))
+                self.logger.print('Expanded variable {} to contain new '\
+                                  'dimension \'{}\''.format(var, self.timedim))
+
         # ---- reshape data as (ncol, lev, time)
         # data is now verified to meet the expected input criteria; 
         # next transpose data to standard format with ncol as the first dimension
@@ -304,9 +330,10 @@ class TEMDiagnostics:
         old_dims = self.wap.dims
         self.wap = self.wap.transpose(*self.data_dims)
         self.logger.print('Variable wap transposed: {} -> {}'.format(old_dims, self.wap.dims))
-        old_dims = self.p.dims
-        self.p = self.p.transpose(*self.data_dims)
-        self.logger.print('Variable p transposed: {} -> {}'.format(old_dims, self.p.dims))
+        if(self.ptype == 'var'):
+            old_dims = self.p.dims
+            self.p = self.p.transpose(*self.data_dims)
+            self.logger.print('Variable p transposed: {} -> {}'.format(old_dims, self.p.dims))
         
         # ---- get coordinates, data lengths
         self.lev  = self.ua[self.levdim]   # model levels [hPa]
@@ -330,6 +357,7 @@ class TEMDiagnostics:
         self.ZM_N = len(self.zm_lat)   # length of zonal mean latitude set
         self.logger.print('Built zonal-mean latitude grid with {} deg spacing: {}'.format(
                                                                 self.zm_dlat, self.zm_lat))
+
     
 
     # --------------------------------------------------

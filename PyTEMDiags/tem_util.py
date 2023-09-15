@@ -38,7 +38,9 @@ class logger:
 def lat_gradient(A, lat):
     return np.gradient(A, lat, axis=0)
 
-def p_gradient(A, p):
+def p_gradient_1d(A, p):
+
+def p_gradient_3d(A, p):
     ncol, nlev, nt = A.shape[0], A.shape[1], A.shape[2]
     dAdp = np.zeros((ncol, nlev, nt))
     for i in range(ncol):
