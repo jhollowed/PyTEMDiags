@@ -1,4 +1,4 @@
-# PyTEM
+# PyTEMDiags
 
 This package provides an interface for performing Transformed Eulerian Mean(TEM) analyses on simulated atmospheric datasets. The specific quantities available for computing are those given in Table A1 of the DynVarMIP experimental design protocol ([Gerber & Manzini 2016](https://gmd.copernicus.org/articles/9/3413/2016/), hereafter GM16). This includes the Eliasen-Palm (EP) flux components, the EP flux divergence, TEM residual velocities, the TEM mass streamfunction, and various contributing quantities. See the [Inputs, Outputs](#io) section below for more detail.
 

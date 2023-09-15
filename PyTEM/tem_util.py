@@ -14,7 +14,7 @@ from timeit import default_timer
 
 
 class logger:
-    def __init__(debug, name='PyTEM'):
+    def __init__(debug, name='PyTEMDiags'):
         self.debug = debug
         self.name  = name
         self.timer_running = False

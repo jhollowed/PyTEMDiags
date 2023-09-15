@@ -5,11 +5,11 @@
 
 from setuptools import setup
 
-setup(name='PyTEM',
+setup(name='PyTEMDiags',
       version='0.1',
       description='Package for preforming Transformed Eulerian Mean analysis on unstructured climate model datasets in Python',
-      url='https://github.com/jhollowed/PyTEM',
+      url='https://github.com/jhollowed/PyTEMDiags',
       author='Joe Hollowed',
       author_email='hollowed@umich.edu',
-      packages=['PyTEM'],
+      packages=['PyTEMDiags'],
       zip_safe=False)

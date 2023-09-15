@@ -1,4 +1,4 @@
-# Oops, why are you looking here? PyTEM is implemented as a Python "regular package",
+# Oops, why are you looking here? PyTEMDiags is implemented as a Python "regular package",
 # where each subdirectory in the top-level parent package must be given __init__.py files,
 # containing code run at import-time.
 # See section 5.2.1 at
