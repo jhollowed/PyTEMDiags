@@ -9,8 +9,7 @@
 
 # =========================================================================
 
-
-from .sph_zonal_mean import sph_zonal_mean
+from .sph_zonal_mean import sph_zonal_averager
 from .tem_diagnostics import TEMDiagnostics
 
 # define attributes
