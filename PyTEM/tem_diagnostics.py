@@ -338,7 +338,7 @@ class TEMDiagnostics:
         self.dthetab_dp = np.gradient(self.thetab, self.pb, axis=1)
  
         ubcoslat            = self.ub * self.zm_coslat
-        self.dubcoslat_dlat = np.gradient(uVbcoslat, self.zm_lat, axis=0)
+        self.dubcoslat_dlat = np.gradient(ubcoslat, self.zm_lat, axis=0)
         
         self.psi             = self.vptpb / self.dthetab_dp 
         psicoslat            = self.psi * self.zm_coslat
