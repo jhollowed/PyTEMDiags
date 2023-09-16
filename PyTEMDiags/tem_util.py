@@ -39,11 +39,24 @@ def lat_gradient(A, lat):
     return np.gradient(A, lat, axis=0)
 
 def p_gradient_1d(A, p):
+    return np.gradient(A, lat, axis=1)
 
 def p_gradient_3d(A, p):
     ncol, nlev, nt = A.shape[0], A.shape[1], A.shape[2]
-    dAdp = np.zeros((ncol, nlev, nt))
+    dA_dp = np.zeros((ncol, nlev, nt))
     for i in range(ncol):
         for t in range(nt):
-            dAdp[i, :, t] = np.gradient(A[i,:,t], p[i,:,t])
-    return dAdp
+            dA_dp[i, :, t] = np.gradient(A[i,:,t], p[i,:,t])
+    return dA_dp
+
+def p_integral_1d(A, p):
+    return np.trapz(self.vb, self.p, axis=1)
+
+def p_integral_3d(A, p):
+    ncol, nlev, nt = A.shape[0], A.shape[1], A.shape[2]
+    intAdp = np.zeros((ncol, nlev, nt))
+    for i in range(ncol):
+        for t in range(nt):
+            intAdp[i, :, t] = np.trapz(A[i,:,t], p[i,:,t])
+    return intAdp
+
