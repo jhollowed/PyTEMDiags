@@ -186,53 +186,29 @@ class TEMDiagnostics:
     lat_zm.
     '''
     @property
-    def ub(self): return self._zm_return_func(self.ub)
-    @ub.setter
-    def set_ub(self, x): self.ub = x
+    def ub(self): return self._zm_return_func(self._ub)
     @property
-    def vb(self): return self._zm_return_func(self.vb)
-    @vb.setter
-    def set_vb(self, x): self.vb = x
+    def vb(self): return self._zm_return_func(self._vb)
     @property
-    def thetab(self): return self._zm_return_func(self.thetab)
-    @thetab.setter
-    def set_thetab(self, x): self.thetab = x
+    def thetab(self): return self._zm_return_func(self._thetab)
     @property
-    def wapb(self): return self._zm_return_func(self.wapb)
-    @wapb.setter
-    def set_wapb(self, x): self.wapb = x
+    def wapb(self): return self._zm_return_func(self._wapb)
     @property
-    def upvpb(self): return self._zm_return_func(self.upvpb)
-    @upvpb.setter
-    def set_upvpb(self, x): self.upvpb = x
+    def upvpb(self): return self._zm_return_func(self._upvpb)
     @property
-    def upwappb(self): return self._zm_return_func(self.upwappb)
-    @upwappb.setter
-    def set_upwappb(self, x): self.upwappb = x
+    def upwappb(self): return self._zm_return_func(self._upwappb)
     @property
-    def vptpb(self): return self._zm_return_func(self.vptpb)
-    @vptpb.setter
-    def set_vptpb(self, x): self.vptpb = x
+    def vptpb(self): return self._zm_return_func(self._vptpb)
     @property
-    def dub_dp(self): return self._zm_return_func(self.dub_dp)
-    @dub_dp.setter
-    def set_dub_dp(self, x): self.dub_dp = x
+    def dub_dp(self): return self._zm_return_func(self._dub_dp)
     @property
-    def dthetab_dp(self): return self._zm_return_func(self.dthetab_dp)
-    @dthetab_dp.setter
-    def set_dthetab_dp(self, x): self.dthetab_dp = x
+    def dthetab_dp(self): return self._zm_return_func(self._dthetab_dp)
     @property
-    def dubcoslat_dlat(self): return self._zm_return_func(self.dubcoslat_dlat)
-    @dubcoslat_dlat.setter
-    def set_dubcoslat_dlat(self, x): self.dubcoslat_dlat = x
+    def dubcoslat_dlat(self): return self._zm_return_func(self._dubcoslat_dlat)
     @property
-    def dpsicoslat_dlat(self): return self._zm_return_func(self.dpsicoslat_dlat)
-    @dpsicoslat_dlat.setter
-    def set_dpsicoslat_dlat(self, x): self.dpsicoslat_dlat = x
+    def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
     @property
-    def dpsi_dp(self): return self._zm_return_func(self.dpsi_dp)
-    @dpsi_dp.setter
-    def set_dpsi_dp(self, x): self.dpsi_dp = x
+    def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
     
 
     # --------------------------------------------------
@@ -500,14 +476,14 @@ class TEMDiagnostics:
         '''
         Decomposes atmospheric variables into zonal means and eddy components.
         ''' 
-        self.ub     = self._zonal_mean(self.ua) 
-        self.up     = self.ua - self.ub
-        self.vb     = self._zonal_mean(self.va) 
-        self.vp     = self.va - self.vb
-        self.thetab = self._zonal_mean(self.theta) 
-        self.thetap = self.theta - self.thetab
-        self.wapb   = self._zonal_mean(self.wap) 
-        self.wapp   = self.wap - self.wapb
+        self._ub     = self._zonal_mean(self.ua) 
+        self._up     = self.ua - self._ub
+        self._vb     = self._zonal_mean(self.va) 
+        self._vp     = self.va - self._vb
+        self._thetab = self._zonal_mean(self.theta) 
+        self._thetap = self.theta - self._thetab
+        self._wapb   = self._zonal_mean(self.wap) 
+        self._wapp   = self.wap - self._wapb
     
 
     # --------------------------------------------------
@@ -517,12 +493,12 @@ class TEMDiagnostics:
         '''
         Computes momentum and potential temperature fluxes, and their zonal averages.
         '''
-        self.upvp    = self.up * self.vp
-        self.upvpb   = self._zonal_mean(self.upvp)
-        self.upwapp  = self.up * self.wapp
-        self.upwappb = self._zonal_mean(self.upwapp)
-        self.vptp    = self.vp * self.thetap
-        self.vptpb   = self._zonal_mean(self.vptp)
+        self._upvp    = self._up * self._vp
+        self._upvpb   = self._zonal_mean(self._upvp)
+        self._upwapp  = self._up * self._wapp
+        self._upwappb = self._zonal_mean(self._upwapp)
+        self._vptp    = self._vp * self._thetap
+        self._vptpb   = self._zonal_mean(self._vptp)
     
 
     # --------------------------------------------------
@@ -532,17 +508,17 @@ class TEMDiagnostics:
         '''
         Computes vertical and meridional derivatives, and their zonal averages.
         '''
-        self.dub_dp          = self._p_gradient(self.ub, self.p)
-        self.dthetab_dp      = self._p_gradient(self.thetab, self.p)
+        self._dub_dp          = self._p_gradient(self._ub, self.p)
+        self._dthetab_dp      = self._p_gradient(self._thetab, self.p)
  
-        ubcoslat             = self._multiply_coslatb(self.ub)
-        self.dubcoslat_dlat  = lat_gradient(ubcoslat, self.lat)
+        ubcoslat              = self._multiply_coslatb(self._ub)
+        self._dubcoslat_dlat  = lat_gradient(ubcoslat, self.lat)
         
         # ψ = bar(v'* θ') / (dθ'/dp)
-        self.psi             = self.vptpb / self.dthetab_dp 
-        psicoslat            = self._multiply_coslatb(self.psi)
-        self.dpsicoslat_dlat = lat_gradient(psicoslat, self.coslat)
-        self.dpsi_dp         = self._p_gradient(self.psi) 
+        self._psi             = self._vptpb / self._dthetab_dp 
+        psicoslat             = self._multiply_coslatb(self._psi)
+        self._dpsicoslat_dlat = lat_gradient(psicoslat, self.coslat)
+        self._dpsi_dp         = self._p_gradient(self._psi) 
     
 
     # --------------------------------------------------
@@ -553,7 +529,7 @@ class TEMDiagnostics:
         Returns the northward component of the EP flux in m3/s2.
         '''
         # F_Φ = p/p0 * ( a*cos(φ) * (d(bar(u))/dp * ψ - bar(u'*v') ))
-        x = self._multiply_lat(self.dubdp * self.psi - self.dupvpb, a*self.coslat)
+        x = self._multiply_lat(self.dubdp * self._psi - self._upvpb, a*self.coslat)
         return self._multiply_pres(x, self.p/self.p0)
     
     # --------------------------------------------------
@@ -563,8 +539,8 @@ class TEMDiagnostics:
         Returns the upward component of the EP flux in m3/s2.
         '''
         # F_z = -H/p0 * a*cos(φ) * (( f - 1/(a*cos(φ)) * d(bar(u)*cos(φ))/dφ )*ψ - bar(u'*ω'))
-        x = f - self._multiply_lat(self.dubcoslat_dlat, 1/(a*self.coslat))
-        return -H/self.p0 * self._multiply_lat((x*self.psi - self.upwappb), a*self.coslat)
+        x = f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat))
+        return -H/self.p0 * self._multiply_lat((x*self._psi - self._upwappb), a*self.coslat)
     
     # --------------------------------------------------
 
@@ -589,7 +565,7 @@ class TEMDiagnostics:
         Returns the TEM northward wind in m/s.
         '''
         # bar(v)* = bar(v) - dψ/dp
-        return self.vb - self.dpsi_dp 
+        return self._vb - self._dpsi_dp 
     
     # --------------------------------------------------
 
@@ -598,7 +574,7 @@ class TEMDiagnostics:
         Returns the TEM upward wind in m/s.
         '''
         # bar(ω)* = bar(ω) + 1/(a*cos(φ)) * d(ψ*cos(φ))/dφ
-        return self.wapb + self._multiply_lat(self.dpsicoslat_dlat, 1/(a*self.coslat))
+        return self._wapb + self._multiply_lat(self._dpsicoslat_dlat, 1/(a*self.coslat))
     
     # --------------------------------------------------
 
@@ -607,8 +583,8 @@ class TEMDiagnostics:
         Returns the TEM mass stream function in kg/s.
         '''
         # Ψ(p) = 2π*a*cos(φ)/g * (int_p^0[bar(v)dp] - ψ)
-        int_vbdp  = self._p_integrate(self.vb, self.p)
-        return 2*pi*a/g0 * self._multiply_lat(int_vbdp - self.psi, self.zm_coslat)
+        int_vbdp  = self._p_integrate(self._vb, self.p)
+        return 2*pi*a/g0 * self._multiply_lat(int_vbdp - self._psi, self.zm_coslat)
     
     # --------------------------------------------------
  
@@ -629,7 +605,7 @@ class TEMDiagnostics:
         '''
         # d(bar(u))/dt|_adv(bar(v)*) = bar(v)* * (f - 1/(a*cos(φ)) * d(bar(u)cos(φ))/dφ)
         vstar = self.vtem()
-        diff = (self.zm_f - self._multiply_lat(self.dubcoslat_dlat, 1/(a*self.coslat)))
+        diff = (self.zm_f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat)))
         return vstar * diff
     
     # --------------------------------------------------
@@ -640,7 +616,7 @@ class TEMDiagnostics:
         ''' 
         # d(bar(u))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(u)/dp
         wstar = self.wtem
-        return -wstar * self.dub_dp
+        return -wstar * self._dub_dp
         
 
 # =========================================================================
