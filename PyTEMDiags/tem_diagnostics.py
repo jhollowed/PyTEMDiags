@@ -28,196 +28,150 @@ DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
 
 
 class TEMDiagnostics:
-    '''
-    This class provides interfaces for computing TEM diagnostic quantities, assuming 
-    either a log-pressure (the default) or pure-pressure vertical coordinate. Upon 
-    initialization, the input data is checked and reshaped as necessary, zonal-averaging 
-    matrices are built, and zonal mean and eddy components are computed. The available 
-    data inputs and outputs (and their naming conventions) are derived from the DynVarMIP
-    experimental protocol (Gerber+Manzini 2016).
-
-    Parameters
-    ----------
-    ua : xarray DataArray
-        Eastward wind, in m/s. This and all other data inputs are expected in at least 2D
-        (unstructured spatially 3D), with optional third temporal dimension. The 
-        horizontal, vertical, and optional temporal dimensions must be named, with names
-        matching those given by the argument 'dim_names'. The expected units of the 
-        coordinates are: ncol dimensionless, lev in hPa, time in hours.
-    va : xarray DataArray
-        Northward wind, in m/s.
-    ta : xarray DataArray
-        Air temperature, in K.
-    wap : xarray DataArray
-        Vertical pressure velocity, in Pa/s.
-    p : xarray DataArray
-        Air pressure, in Pa. This variable can either be a coordinate or a variable.
-        If a coordinate, requires:
-            1D array, matching the length of the data variables in the vertical dimension
-        If a variable, requires:
-            ND array, matching the dimensionality of the data.
-        If p is passed as a variable, then all derivatives are computed individually 
-        per-column, and an extra remapping step is performed to return zonally avergaed 
-        quantities, thus the computations are slower.
-    lat_native : xarray DataArray
-        Latitudes in degrees.
-    p0 : float
-        Reference pressure in Pa. Defaults to the DynVarMIP value in constants.py
-    zm_dlat : float, optional
-        Spacing used to generate uniform 1D latitude grid for zonal means, in degrees. 
-        Defaults to 1 degree.
-    L : int, optional
-        Maximum spherical harmonic degree to use in zonal averaging. Defaults to 50.
-    dim_names : dict, optional
-        Dimension names to expect from the input data, as a dictionary that contains
-        the following key:value pairs:
-        'horz':{name of horizontal dimension}
-        'vert':{name of vertical dimension}
-        'time':{name of temporal dimension}
-        Defaults to: {'horz':'ncol', 'vert':'lev', 'time':'time'}. The order of the
-        dimensions in the input data does not matter; data will be reshaped at 
-        object initialization.
-    log_pressure : bool, optional
-        Whether or not to perform the TEM analysis in a log-pressure vertical 
-        coordinate.If False, then a pure pressure vertical coordinate is used. 
-        Defaults to True.
-    grid_name : str, optional
-        The 'grid_name' input argument to sph_zonal_averager(). See docstrings therein.
-    zm_grid_name : str, optional
-        The 'grid_out_name' input argument to sph_zonal_averager(). See docstrings therein.
-    map_save_dest : str, optional
-        The 'save_dest' input argument to sph_zonal_averager(). See docstrings therein.
-    overwrite_map : bool, optional
-        The 'overwrite' input argument to sph_compute_matrices(). See docstrings therein.
-    zm_pole_points : bool, optional
-        Whether or not to include the pole points in the zonal mean latitude set 
-        specified by zm_dlat. If False, then after the uniform lattiude set with 
-        spacing zm_dlat is built, it will then be shifted such that the data points
-        lie at the midpoint of each of these cells. Defaults to False.
-    debug : bool, optional
-        Whether or not to print verbose progress statements to stdout.
-    
-    Public Methods
-    --------------
-    epfy()
-        Returns the northward component of the EP flux in m3/s2.
-    epfz()
-        Returns the upward component of the EP flux in m3s2.
-    epdiv()
-        Returns the EP flux divergence.
-    vtem()
-        Returns the TEM northward wind in m/s.
-    wtem()
-        Returns the TEM upward wind in m/s.
-    psitem()
-        Returns the TEM mass stream function in kg/s.
-    utendepfd()
-        Returns the tendency of eastward wind due to EP flux divergence in m/s2.
-    utendvtem()
-        Returns the tendency of eastward wind due to TEM northward wind advection 
-        and coriolis in m/s2.
-    utendwtem()
-        Returns the tendency of eastward wind due to TEM upward wind advection in m/s2.
-    
-    Public Attributes
-    -----------------
-    All input arguments are attributes of the same name, as well as:
-    ZM : sph_zonal_averager object
-        Zonal averager object associated with current configuration.
-    lat_zm : 1D array
-        Zonal mean latitude set in degrees.
-    theta : N-D array
-        Potential temperature in K, matching dims of input ta.
-    up : N-D array
-        "u-prime", zonally asymmetric anomaly in ua in m/s, matching dims of input ua.
-    vp : N-D array
-        "v-prime", zonally asymmetric anomaly in va in m/s, matching dims of input va.
-    wapp : N-D array
-        "wap-prime", zonally asymmetric anomaly in wap in Pa/s, matching dims of 
-        input wap.
-    thetap : N-D array
-        "theta-prime", zonally asymmetric anomaly in K, matching dims of input ta.
-    ub : N-D array
-        "u-bar", zonal mean of ua in m/s, matching length of lat_zm in the horizontral, 
-        otherwise matching dims of input ua.
-    vb : N-D array
-        "v-bar", zonal mean of va in m/s, matching length of lat_zm in the horizontral, 
-        otherwise matching dims of input va.
-    wapb : N-D array
-        "omega-bar", zonal mean of wap in Pa/a, matching length of lat_zm in the 
-        horizontral, otherwise matching dims of input wap.
-    thetab : N-D array
-        "theta-bar", zonal mean of theta in K, matching length of lat_zm in the 
-        horizontral, otherwise matching dims of input ta.
-    upvp : N-D array
-        Product of up and vp in m2/s2, aka northward flux of eastward momentum, matching 
-        dims of input ua.
-    upvpb : N-D array
-        Zonal mean of upvp in m2/s2, matching length of lat_zm in the horizontal, 
-        otherwise matching dims of input ua.
-    upwapp : N-D array
-        Product of up and wapp in (m Pa)/s2, aka upward flux of eastward momentum, 
-        matching dims of input ua.
-    upwwappb : N-D array
-        Zonal mean of upwapp in (m Pa)/s2, matching length of lat_zm in the horizontal, 
-        otherwise matching dims of input ua.
-    vptp : N-D array       
-        Product of vp and thetap in (m K)/s, aka northward flux of potential temperature,
-        matching dims of input va.
-    vptpb : N-D array
-        Zonal mean of vptp in (m K)/s, matching length of lat_zm in the horizontal, 
-        otherwise matching dims of input va.
-    '''
-    
-
-    # --------------------------------------------------
-    
-
-    '''
-    Below are a set of getter functions for all zonally-averaged quantities.
-    If ptype == cord, then these do nothing other than return the variables.
-    If ptype == var, then:
-    Internal to the class, these quantities are defined on the native grid, 
-    where all computations occur (this is done since the vertical coordinate 
-    is unstructured in pressure; computing everything on the native grid avoids 
-    needing to assume model level pressure, or interpolate to pressure levels).
-    It would be obnoxious, however, to return to the user zonal averages with 
-    NCOL data points. Instead, these getter functions remap the quantities to
-    lat_zm.
-    '''
-    @property
-    def ub(self): return self._zm_return_func(self._ub)
-    @property
-    def vb(self): return self._zm_return_func(self._vb)
-    @property
-    def thetab(self): return self._zm_return_func(self._thetab)
-    @property
-    def wapb(self): return self._zm_return_func(self._wapb)
-    @property
-    def upvpb(self): return self._zm_return_func(self._upvpb)
-    @property
-    def upwappb(self): return self._zm_return_func(self._upwappb)
-    @property
-    def vptpb(self): return self._zm_return_func(self._vptpb)
-    @property
-    def dub_dp(self): return self._zm_return_func(self._dub_dp)
-    @property
-    def dthetab_dp(self): return self._zm_return_func(self._dthetab_dp)
-    @property
-    def dubcoslat_dlat(self): return self._zm_return_func(self._dubcoslat_dlat)
-    @property
-    def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
-    @property
-    def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
-    
-
-    # --------------------------------------------------
-
-
     def __init__(self, ua, va, ta, wap, p, lat_native, p0=P0, zm_dlat=1, L=150, 
                  dim_names=DEFAULT_DIMS, log_pressure=True, grid_name=None, 
                  zm_grid_name=None, map_save_dest=None, overwrite_map=False, 
                  zm_pole_points=False, debug=False):
+        '''
+        This class provides interfaces for computing TEM diagnostic quantities, assuming 
+        either a log-pressure (the default) or pure-pressure vertical coordinate. Upon 
+        initialization, the input data is checked and reshaped as necessary, zonal-averaging 
+        matrices are built, and zonal mean and eddy components are computed. The available 
+        data inputs and outputs (and their naming conventions) are derived from the DynVarMIP
+        experimental protocol (Gerber+Manzini 2016).
+
+        Parameters
+        ----------
+        ua : xarray DataArray
+            Eastward wind, in m/s. This and all other data inputs are expected in at least 2D
+            (unstructured spatially 3D), with optional third temporal dimension. The 
+            horizontal, vertical, and optional temporal dimensions must be named, with names
+            matching those given by the argument 'dim_names'. The expected units of the 
+            coordinates are: ncol dimensionless, lev in hPa, time in hours.
+        va : xarray DataArray
+            Northward wind, in m/s.
+        ta : xarray DataArray
+            Air temperature, in K.
+        wap : xarray DataArray
+            Vertical pressure velocity, in Pa/s.
+        p : xarray DataArray
+            Air pressure, in Pa. This variable can either be a coordinate or a variable.
+            If a coordinate, requires:
+                1D array, matching the length of the data variables in the vertical dimension
+            If a variable, requires:
+                ND array, matching the dimensionality of the data.
+            If p is passed as a variable, then all derivatives are computed individually 
+            per-column, and an extra remapping step is performed to return zonally avergaed 
+            quantities, thus the computations are slower.
+        lat_native : xarray DataArray
+            Latitudes in degrees.
+        p0 : float
+            Reference pressure in Pa. Defaults to the DynVarMIP value in constants.py
+        zm_dlat : float, optional
+            Spacing used to generate uniform 1D latitude grid for zonal means, in degrees. 
+            Defaults to 1 degree.
+        L : int, optional
+            Maximum spherical harmonic degree to use in zonal averaging. Defaults to 50.
+        dim_names : dict, optional
+            Dimension names to expect from the input data, as a dictionary that contains
+            the following key:value pairs:
+            'horz':{name of horizontal dimension}
+            'vert':{name of vertical dimension}
+            'time':{name of temporal dimension}
+            Defaults to: {'horz':'ncol', 'vert':'lev', 'time':'time'}. The order of the
+            dimensions in the input data does not matter; data will be reshaped at 
+            object initialization.
+        log_pressure : bool, optional
+            Whether or not to perform the TEM analysis in a log-pressure vertical 
+            coordinate.If False, then a pure pressure vertical coordinate is used. 
+            Defaults to True.
+        grid_name : str, optional
+            The 'grid_name' input argument to sph_zonal_averager(). See docstrings therein.
+        zm_grid_name : str, optional
+            The 'grid_out_name' input argument to sph_zonal_averager(). See docstrings therein.
+        map_save_dest : str, optional
+            The 'save_dest' input argument to sph_zonal_averager(). See docstrings therein.
+        overwrite_map : bool, optional
+            The 'overwrite' input argument to sph_compute_matrices(). See docstrings therein.
+        zm_pole_points : bool, optional
+            Whether or not to include the pole points in the zonal mean latitude set 
+            specified by zm_dlat. If False, then after the uniform lattiude set with 
+            spacing zm_dlat is built, it will then be shifted such that the data points
+            lie at the midpoint of each of these cells. Defaults to False.
+        debug : bool, optional
+            Whether or not to print verbose progress statements to stdout.
+        
+        Public Methods
+        --------------
+        epfy()
+            Returns the northward component of the EP flux in m3/s2.
+        epfz()
+            Returns the upward component of the EP flux in m3s2.
+        epdiv()
+            Returns the EP flux divergence.
+        vtem()
+            Returns the TEM northward wind in m/s.
+        wtem()
+            Returns the TEM upward wind in m/s.
+        psitem()
+            Returns the TEM mass stream function in kg/s.
+        utendepfd()
+            Returns the tendency of eastward wind due to EP flux divergence in m/s2.
+        utendvtem()
+            Returns the tendency of eastward wind due to TEM northward wind advection 
+            and coriolis in m/s2.
+        utendwtem()
+            Returns the tendency of eastward wind due to TEM upward wind advection in m/s2.
+        
+        Public Attributes
+        -----------------
+        All input arguments are attributes of the same name, as well as:
+        ZM : sph_zonal_averager object
+            Zonal averager object associated with current configuration.
+        lat_zm : 1D array
+            Zonal mean latitude set in degrees.
+        theta : N-D array
+            Potential temperature in K, matching dims of input ta.
+        up : N-D array
+            "u-prime", zonally asymmetric anomaly in ua in m/s, matching dims of input ua.
+        vp : N-D array
+            "v-prime", zonally asymmetric anomaly in va in m/s, matching dims of input va.
+        wapp : N-D array
+            "wap-prime", zonally asymmetric anomaly in wap in Pa/s, matching dims of 
+            input wap.
+        thetap : N-D array
+            "theta-prime", zonally asymmetric anomaly in K, matching dims of input ta.
+        ub : N-D array
+            "u-bar", zonal mean of ua in m/s, matching length of lat_zm in the horizontral, 
+            otherwise matching dims of input ua.
+        vb : N-D array
+            "v-bar", zonal mean of va in m/s, matching length of lat_zm in the horizontral, 
+            otherwise matching dims of input va.
+        wapb : N-D array
+            "omega-bar", zonal mean of wap in Pa/a, matching length of lat_zm in the 
+            horizontral, otherwise matching dims of input wap.
+        thetab : N-D array
+            "theta-bar", zonal mean of theta in K, matching length of lat_zm in the 
+            horizontral, otherwise matching dims of input ta.
+        upvp : N-D array
+            Product of up and vp in m2/s2, aka northward flux of eastward momentum, matching 
+            dims of input ua.
+        upvpb : N-D array
+            Zonal mean of upvp in m2/s2, matching length of lat_zm in the horizontal, 
+            otherwise matching dims of input ua.
+        upwapp : N-D array
+            Product of up and wapp in (m Pa)/s2, aka upward flux of eastward momentum, 
+            matching dims of input ua.
+        upwwappb : N-D array
+            Zonal mean of upwapp in (m Pa)/s2, matching length of lat_zm in the horizontal, 
+            otherwise matching dims of input ua.
+        vptp : N-D array       
+            Product of vp and thetap in (m K)/s, aka northward flux of potential temperature,
+            matching dims of input va.
+        vptpb : N-D array
+            Zonal mean of vptp in (m K)/s, matching length of lat_zm in the horizontal, 
+            otherwise matching dims of input va.
+        '''
 
         self._logger = logger(debug, header=True)
         
@@ -455,6 +409,47 @@ class TEMDiagnostics:
             self._multiply_pres    = lambda a,p=self.p: a*p               # (j)
             self._logger.print('configuration set for pressure p as a variable')
         self._multiply_lat = lambda a,lat: np.einsum('ijk,i->ijk', a, lat) #(k)
+    
+
+    # --------------------------------------------------
+    
+
+    '''
+    Below are a set of getter functions for all zonally-averaged quantities.
+    If ptype == cord, then these do nothing other than return the variables.
+    If ptype == var, then:
+    Internal to the class, these quantities are defined on the native grid, 
+    where all computations occur (this is done since the vertical coordinate 
+    is unstructured in pressure; computing everything on the native grid avoids 
+    needing to assume model level pressure, or interpolate to pressure levels).
+    It would be obnoxious, however, to return to the user zonal averages with 
+    NCOL data points. Instead, these getter functions remap the quantities to
+    lat_zm.
+    '''
+    @property
+    def ub(self): return self._zm_return_func(self._ub)
+    @property
+    def vb(self): return self._zm_return_func(self._vb)
+    @property
+    def thetab(self): return self._zm_return_func(self._thetab)
+    @property
+    def wapb(self): return self._zm_return_func(self._wapb)
+    @property
+    def upvpb(self): return self._zm_return_func(self._upvpb)
+    @property
+    def upwappb(self): return self._zm_return_func(self._upwappb)
+    @property
+    def vptpb(self): return self._zm_return_func(self._vptpb)
+    @property
+    def dub_dp(self): return self._zm_return_func(self._dub_dp)
+    @property
+    def dthetab_dp(self): return self._zm_return_func(self._dthetab_dp)
+    @property
+    def dubcoslat_dlat(self): return self._zm_return_func(self._dubcoslat_dlat)
+    @property
+    def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
+    @property
+    def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
 
 
     # --------------------------------------------------
