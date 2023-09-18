@@ -190,6 +190,14 @@ class sph_zonal_averager:
                                'grid_name_out, and save_dest, or call sph_compute_matrices()'\
                                'before sph_zonal_mean() or sph_zonal_mean_native()!')
 
+        # ---- A will have been passed by refernce; 
+        #      make copy of the data object for modification
+        A = A.copy(deep=True)
+        
+        # ---- if variable has no name, assign temporary name (which is more clear than 'None')
+        if(A.name is None):
+            A.name = '{unnamed variable}'
+
         # ---- check dimensions of input data
         dims = A.dims
         shape = A.shape

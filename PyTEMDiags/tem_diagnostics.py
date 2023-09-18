@@ -17,7 +17,7 @@ import numpy as np
 import xarray as xr
 
 # ---- imports from this package
-from .tem_util import *
+from . import tem_util as util
 from .constants import *
 from .sph_zonal_mean import *
 
@@ -173,7 +173,7 @@ class TEMDiagnostics:
             otherwise matching dims of input va.
         '''
 
-        self._logger = logger(debug, header=True)
+        self._logger = util.logger(debug, header=True)
         
         # ---- get input args
         # variables
@@ -233,20 +233,20 @@ class TEMDiagnostics:
         '''
 
         # ---- get dim names
-        self.ncoldim   = self.dim_names['horz']
-        self.levdim    = self.dim_names['vert']
+        self.ncolname   = self.dim_names['horz']
+        self.levname    = self.dim_names['vert']
         # use default time dim name if not present in data
-        try: self.timedim   = self.dim_names['time']
-        except KeyError: self.timedim = DEFAULT_DIMS['time']
-        self.data_dims = (self.ncoldim, self.levdim, self.timedim)
+        try: self.timename   = self.dim_names['time']
+        except KeyError: self.timename = DEFAULT_DIMS['time']
+        self.data_dims = (self.ncolname, self.levname, self.timename)
         
         allvars     = {'ua':self.ua, 'va':self.va, 'ta':self.ta, 
                        'wap':self.wap, 'lat':self.lat_native}
 
         # ---- check if pressure was input as a coordinate (1D) or a variable (>1D)
-        if len(self.p.dims) == 1 and self.p.dims[0] == self.levdim:
+        if len(self.p.dims) == 1 and self.p.dims[0] == self.levname:
             self._ptype = 'coord'
-        elif self.p.dims == self.ua.dims and self.levdim in self.p.dims:
+        elif self.p.dims == self.ua.dims and self.levname in self.p.dims:
             self._ptype = 'var'
             allvars['p'] = self.p
         else:
@@ -254,7 +254,7 @@ class TEMDiagnostics:
                                'the vertical dimension of the data in length (currently {}), '\
                                'or a variable with dimensionality matching the data '\
                                '(currently {})'.format(
-                                self.ua.shape[self.ua.dims.index(self.levdim)], self.ua.dims))
+                                self.ua.shape[self.ua.dims.index(self.levname)], self.ua.dims))
             
         # ---- verify dat input format, transform as needed
         for var,dat in allvars.items():
@@ -262,26 +262,26 @@ class TEMDiagnostics:
                 raise RuntimeError('Input data for arg \'{}\' must be an '\
                                    'xarray DataArray'.format(var))
             # check data dimensions
-            if(self.ncoldim not in dat.dims):
+            if(self.ncolname not in dat.dims):
                 raise RuntimeError('Input data {} does not contain dim {}'.format(
-                                                                var, self.ncoldim)) 
+                                                                var, self.ncolname)) 
             # ensure passed lat and data ncol are consistent
-            if(dat.shape[dat.dims.index(self.ncoldim)] != len(self.lat_native)):
+            if(dat.shape[dat.dims.index(self.ncolname)] != len(self.lat_native)):
                 raise RuntimeError('Dimension {} in variable {} is length {}, but input '\
                                    'parameter lat is length {}; these must match!'.format(
-                                           self.ncoldim, var, var.shape[0], len(self.lat)))
+                                           self.ncolname, var, var.shape[0], len(self.lat)))
             if(var == 'lat'): continue
             # input must have 2 or 3 dimensions 
             if(len(dat.dims) < 2 or len(dat.dims) > 3):
                 raise RuntimeError('Input data has {0} dims, expected either 2 ({1}, {2}) '\
-                                   'or 3 ({1}, {2}, {3})'.format(len(dat.dims), self.ncoldim, 
-                                                                 self.levdim, self.timedim))
+                                   'or 3 ({1}, {2}, {3})'.format(len(dat.dims), self.ncolname, 
+                                                                 self.levname, self.timename))
             # if time doesn't exist, expand the data arrays to include a new temporal
             # dimension of length 1, value 0.
-            if(self.timedim not in dat.dims):
-                dat = dat.expand_dims(self.timedim, axis=len(dat.dims))
+            if(self.timename not in dat.dims):
+                dat = dat.expand_dims(self.timename, axis=len(dat.dims))
                 self._logger.print('Expanded variable {} to contain new '\
-                                  'dimension \'{}\''.format(var, self.timedim))
+                                  'dimension \'{}\''.format(var, self.timename))
 
         # ---- reshape data as (ncol, lev, time)
         # data is now verified to meet the expected input criteria; 
@@ -306,13 +306,13 @@ class TEMDiagnostics:
             self._logger.print('Variable p transposed: {} -> {}'.format(old_dims, self.p.dims))
         
         # ---- get coordinates, data lengths
-        self.lev  = self.ua[self.levdim]   # model levels [hPa]
-        self.time = self.ua[self.timedim]  # time positions [hours]
+        self.lev  = self.ua[self.levname]   # model levels [hPa]
+        self.time = self.ua[self.timename]  # time positions [hours]
         self.NCOL = self.ua.shape[0]
         self.NLEV = self.ua.shape[1]  
         self.NT   = self.ua.shape[2] 
         self._logger.print('DATA DIMENSIONS: {} x {} x {} = {} x {} x {}'.format(
-                                                   self.ncoldim, self.levdim, self.timedim, 
+                                                   self.ncolname, self.levname, self.timename, 
                                                    self.NCOL, self.NLEV, self.NT))
         
         # ---- build uniform latitude discretization lat_zm for zonal mean remap
@@ -349,8 +349,24 @@ class TEMDiagnostics:
                 break
         if(make_p_coord):
             self.p = self.p[0,:,0]
+            self._ptype = 'coord'
             self._logger.print('reduced pressure p from a 3D {} variable to a 1D (length {}) '\
                               'coordinate'.format(self.ua.shape, len(self.p)))
+
+        # ---- check pressure direction convention
+        # ensure that pressure increases toward right-end of arrays. If not, flip
+        # this axis for all data
+        if(self.lev[0] > self.lev[-1]):
+            self.ua = self.ua.reindex({self.levname, self.lev[::-1]})
+            self.va = self.va.reindex({self.levname, self.lev[::-1]})
+            self.ta = self.ta.reindex({self.levname, self.lev[::-1]})
+            self.wap = self.wap.reindex({self.levname, self.lev[::-1]})
+            self.p = self.p.reindex({self.levname, self.lev[::-1]})
+            self.lev = self.ua[self.levname]
+            self._logger.print('Reversed direction of vertical dimension for all data '\
+                               '(such that the model top is the leftmost entry in the '\
+                               'pressure data array)')
+            
     
 
     # --------------------------------------------------
@@ -391,24 +407,24 @@ class TEMDiagnostics:
         '''
 
         if(self._ptype == 'coord'):
-            self._p_gradient       = p_gradient_1d                 # (a)
-            self._p_integral       = p_integral_1d                 # (a)
+            self._p_gradient       = util.p_gradient_1d            # (a)
+            self._p_integral       = util.p_integral_1d            # (a)
             self._zonal_mean       = self.ZM.sph_zonal_mean        # (b)
             self.lat, self.coslat  = self.lat_zm, self._coslat_zm  # (c)
             self.f                 = self._f_zm                    # (c)
             self._zm_return_func   = lambda x: x                   # (d)
-            self._multiply_pres    = lambda a,p: np.einsum('ijk,j->ijk', a, p) # (e)
+            self._multiply_pres    = util.multiply_p_1d            # (e)
             self._logger.print('configuration set for pressure p as a coordinate')
         elif(self._ptype == 'var'):
-            self._p_gradient       = p_gradient_3d                        # (f)
-            self._p_integral       = p_integral_3d                        # (f)
+            self._p_gradient       = util.p_gradient_3d                   # (f)
+            self._p_integral       = util.p_integral_3d                   # (f)
             self._zonal_mean       = self.ZM.sph_zonal_mean_native        # (g)
             self.lat, self.coslat  = self.lat_native, self._coslat_native # (h)
             self.f                 = self._f_native                       # (h)
             self._zm_return_func   = self.ZM.sph_zonal_mean               # (i)
-            self._multiply_pres    = lambda a,p=self.p: a*p               # (j)
+            self._multiply_pres    = util.multiply_p_3d                   # (j)
             self._logger.print('configuration set for pressure p as a variable')
-        self._multiply_lat = lambda a,lat: np.einsum('ijk,i->ijk', a, lat) #(k)
+        self._multiply_lat = util.multiply_lat #(k)
     
 
     # --------------------------------------------------
@@ -450,6 +466,8 @@ class TEMDiagnostics:
     def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
     @property
     def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
+    @property
+    def int_vbdp(self): return self.zm_return_func(self._int_vbdp)
 
 
     # --------------------------------------------------
@@ -459,9 +477,18 @@ class TEMDiagnostics:
         '''
         Computes the potential temperature from temperature and pressure.
         '''
+        self._logger.print('computing potential temperature...')
+        
         # θ = T * (p0/p)**k
-        self.theta = self._multiply_pres(self.ta, (self.p0/self.p)**k)
+        theta = self._multiply_pres(self.ta, (self.p0/self.p)**k)
+       
+        # inherit coords, attributes of temperature
+        self.theta = self.ta.copy(deep=True)
+        self.theta.values = theta
         self.theta.name = 'THETA'
+        self.theta.attrs['long_name'] = 'potential temperature'
+        try: del self.theta.attrs['standard_name']
+        except KeyError: pass
 
 
     # --------------------------------------------------
@@ -471,14 +498,23 @@ class TEMDiagnostics:
         '''
         Decomposes atmospheric variables into zonal means and eddy components.
         ''' 
-        self._ub     = self._zonal_mean(self.ua) 
-        self._up     = self.ua - self._ub
-        self._vb     = self._zonal_mean(self.va) 
-        self._vp     = self.va - self._vb
-        self._thetab = self._zonal_mean(self.theta) 
-        self._thetap = self.theta - self._thetab
-        self._wapb   = self._zonal_mean(self.wap) 
-        self._wapp   = self.wap - self._wapb
+        self._logger.print('computing zonal means for input variables...')
+        self._ub          = self._zonal_mean(self.ua)
+        self._ub.name     = 'ub'
+        self._up          = self.ua - self.ZM.sph_zonal_mean_native(self.ua)
+        self._up.name     = 'up'
+        self._vb          = self._zonal_mean(self.va) 
+        self._vb.name     = 'vb'
+        self._vp          = self.va - self.ZM.sph_zonal_mean_native(self.va)
+        self._vp.name     = 'vp'
+        self._thetab      = self._zonal_mean(self.theta) 
+        self._thetab.name = 'thetab'
+        self._thetap      = self.theta - self.ZM.sph_zonal_mean_native(self.theta)
+        self._thetap.name = 'thetap'
+        self._wapb        = self._zonal_mean(self.wap) 
+        self._wapb.name   = 'wapb'
+        self._wapp        = self.wap - self.ZM.sph_zonal_mean_native(self.wap)
+        self._wapp.name   = 'wapp'
     
 
     # --------------------------------------------------
@@ -488,12 +524,19 @@ class TEMDiagnostics:
         '''
         Computes momentum and potential temperature fluxes, and their zonal averages.
         '''
-        self._upvp    = self._up * self._vp
-        self._upvpb   = self._zonal_mean(self._upvp)
-        self._upwapp  = self._up * self._wapp
-        self._upwappb = self._zonal_mean(self._upwapp)
-        self._vptp    = self._vp * self._thetap
-        self._vptpb   = self._zonal_mean(self._vptp)
+        self._logger.print('computing fluxes and flux zonal means...')
+        self._upvp         = self._up * self._vp
+        self._upvp.name    = 'upvp'
+        self._upvpb        = self._zonal_mean(self._upvp)
+        self._upvpb.name   = 'upvpb'
+        self._upwapp       = self._up * self._wapp
+        self._upwapp.name  = 'upwapp'
+        self._upwappb      = self._zonal_mean(self._upwapp)
+        self._upwappb.name = 'upwappb'
+        self._vptp         = self._vp * self._thetap
+        self._vptp.name    = 'vptp'
+        self._vptpb        = self._zonal_mean(self._vptp)
+        self._vptpb.name   = 'vptpb'
     
 
     # --------------------------------------------------
@@ -503,18 +546,21 @@ class TEMDiagnostics:
         '''
         Computes vertical and meridional derivatives, and their zonal averages.
         '''
-        self._dub_dp          = self._p_gradient(self._ub, self.p)
-        self._dthetab_dp      = self._p_gradient(self._thetab, self.p)
- 
-        ubcoslat              = self._multiply_coslatb(self._ub)
-        self._dubcoslat_dlat  = lat_gradient(ubcoslat, self.lat)
+        self._logger.print('computing psi, vertical derivatives, meridional derivatives...')
+        self._dub_dp          = self._p_gradient(self._ub, self.p, self._logger)
+        self._dthetab_dp      = self._p_gradient(self._thetab, self.p, self._logger)
+
+        ubcoslat                   = self._multiply_lat(self._ub, self.coslat)
+        self._dubcoslat_dlat       = lat_gradient(ubcoslat, self.lat)
         
         # ψ = bar(v'* θ') / (dθ'/dp)
-        self._psi             = self._vptpb / self._dthetab_dp 
-        psicoslat             = self._multiply_coslatb(self._psi)
-        self._dpsicoslat_dlat = lat_gradient(psicoslat, self.coslat)
-        self._dpsi_dp         = self._p_gradient(self._psi) 
-    
+        self._psi                  = self._vptpb / self._dthetab_dp 
+        psicoslat                  = self._multiply_lat(self._psi, self.coslat)
+        self._dpsicoslat_dlat      = lat_gradient(psicoslat, self.lat)
+        self._dpsi_dp              = self._p_gradient(self._psi, self.p, self._logger) 
+       
+        self._int_vbdp  = self._p_integral(self._vb, self.p, self._logger)
+
 
     # --------------------------------------------------
 
@@ -578,8 +624,7 @@ class TEMDiagnostics:
         Returns the TEM mass stream function in kg/s.
         '''
         # Ψ(p) = 2π*a*cos(φ)/g * (int_p^0[bar(v)dp] - ψ)
-        int_vbdp  = self._p_integrate(self._vb, self.p)
-        return 2*pi*a/g0 * self._multiply_lat(int_vbdp - self._psi, self.zm_coslat)
+        return 2*pi*a/g0 * self._multiply_lat(self._int_vbdp - self._psi, self.zm_coslat)
     
     # --------------------------------------------------
  
