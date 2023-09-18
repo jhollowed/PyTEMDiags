@@ -48,10 +48,10 @@ def multiply_lat(A, lat):
     Alat        = A.copy(deep=True)
     Alat.values = np.einsum('ijk,i->ijk', A, lat)
 
-    if(hasattr(A, 'name')): Alat.name = 'prod_{}_lat'.format(A.name)
+    if(A.name is not None): Alat.name = 'prod_{}_lat'.format(A.name)
     if 'long_name' in A.attrs:
         Alat.attrs['long_name'] = 'product of {} and latitude'.format(A.long_name)
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         Alat.attrs['long_name'] = 'product of {} and latitude'.format(A.name)
     if 'units' in A.attrs and 'units' in lat.attrs:
         Alat.attrs['units'] = '{} {}'.format(A.units, lat.units)
@@ -69,12 +69,10 @@ def multiply_p_1d(A, p):
     Ap        = A.copy(deep=True)
     Ap.values = np.einsum('ijk,j->ijk', A, p)
 
-    Ap.name = 'prod_{}_p'.format(A.name)
-    
-    if(hasattr(A, 'name')): Ap.name = 'prod_{}_p'.format(A.name)
+    if(A.name is not None): Ap.name = 'prod_{}_p'.format(A.name)
     if 'long_name' in A.attrs:
         Ap.attrs['long_name'] = 'product of {} and pressure'.format(A.long_name)
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         Ap.attrs['long_name'] = 'product of {} and pressure'.format(A.name)
     if 'units' in A.attrs and 'units' in p.attrs:
         Ap.attrs['units'] = '{} {}'.format(A.units, p.units)
@@ -91,10 +89,10 @@ def multiply_p_3d(A, p):
 
     Ap = A*p
     
-    if(hasattr(A, 'name')): Ap.name = 'prod_{}_p'.format(A.name)
+    if(A.name is not None): Ap.name = 'prod_{}_p'.format(A.name)
     if 'long_name' in A.attrs:
         Ap.attrs['long_name'] = 'product of {} and pressure'.format(A.long_name)
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         Ap.attrs['long_name'] = 'product of {} and pressure'.format(A.name)
     if 'units' in A.attrs and 'units' in p.attrs:
         Ap.attrs['units'] = '{} {}'.format(A.units, p.units)
@@ -112,11 +110,11 @@ def lat_gradient(A, lat, logger=None):
     dA_dlat        = A.copy(deep=True)
     dA_dlat.values = np.gradient(A, lat, axis=0)
     
-    if(hasattr(A, 'name')):
+    if(A.name is not None):
         dA_dlat.name               = 'd{}_dlat'.format(A.name)
     if 'long_name' in A.attrs:
         dA_dlat.attrs['long_name'] = 'meridional derivative of {}'.format(A.attrs['long_name'])
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         dA_dlat.attrs['long_name'] = 'meridional derivative of {}'.format(A.name)
     if 'units' in A.attrs and 'units' in lat.attrs:
         dA_dlat.attrs['units']     = '{}/{}'.format(A.units, lat.units)
@@ -134,11 +132,11 @@ def p_gradient_1d(A, p, logger=None):
     dA_dp        = A.copy(deep=True)
     dA_dp.values = np.gradient(A, p, axis=1)
     
-    if(hasattr(A, 'name')):
+    if(A.name is not None):
         dA_dp.name               = 'd{}_dp'.format(A.name)
     if 'long_name' in A.attrs:
         dA_dp.attrs['long_name'] = 'vertical derivative of {}'.format(A.attrs['long_name'])
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         dA_dp.attrs['long_name'] = 'vertical derivative of {}'.format(A.name)
     if 'units' in A.attrs and 'units' in p.attrs:
         dA_dp.attrs['units']     = '{}/{}'.format(A.units, p.units)
@@ -169,11 +167,11 @@ def p_gradient_3d(A, p, logger=None):
     centered_diff = (hs**2*fd + (hd**2 - hs**2)*f - hd**2*fs) / (hs*hd*(hd+hs))
     dA_dp.values  = np.hstack([forward_diff, centered_diff, backward_diff])
 
-    if(hasattr(A, 'name')):
+    if(A.name is not None):
         dA_dp.name               = 'd{}_dp'.format(A.name)
     if 'long_name' in A.attrs:
         dA_dp.attrs['long_name'] = 'vertical derivative of {}'.format(A.attrs['long_name'])
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         dA_dp.attrs['long_name'] = 'vertical derivative of {}'.format(A.name)
     if 'units' in A.attrs and 'units' in p.attrs:
         dA_dp.attrs['units']     = '{}/{}'.format(A.units, p.units)
@@ -208,18 +206,20 @@ def p_integral_1d(A, p, logger=None):
         p = xr.DataArray(p)
     
     intAdp        = A.copy(deep=True)
-    intAdp.values = np.trapz(A, p, axis=1)
+    intAdp.values = np.zeros(A.shape)
+    for k in range(len(p)):
+        intAdp[:,k,:] = np.trapz(A[:,:k+1,:], p[:k+1], axis=1)
     
-    if(hasattr(A, 'name')):
+    if(A.name is not None):
         intAdp.name               = 'int{}dp'.format(A.name)
     if 'long_name' in A.attrs:
         intAdp.attrs['long_name'] = 'vertical integral of {}'.format(A.attrs['long_name'])
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         intAdp.attrs['long_name'] = 'vertical derivative of {}'.format(A.name)
     if 'units' in A.attrs and 'units' in p.attrs:
         intAdp.attrs['units']     = '{}/{}'.format(A.units, p.units)
     
-    return dA_dp
+    return intAdp
 
 
 def p_integral_3d(A, p, logger=None):
@@ -238,11 +238,11 @@ def p_integral_3d(A, p, logger=None):
     trapz         = np.cumsum(trapz_bases * 0.5*trapz_heights, axis=1)
     intAdp.values = np.hstack([zeros, trapz]) #integral at model top is from p=[0, 0]; should be 0
     
-    if(hasattr(A, 'name')):
+    if(A.name is not None):
         intAdp.name               = 'int{}dp'.format(A.name)
     if 'long_name' in A.attrs:
         intAdp.attrs['long_name'] = 'vertical integral of {}'.format(A.attrs['long_name'])
-    elif hasattr(A, 'name'):
+    elif A.name is not None:
         intAdp.attrs['long_name'] = 'vertical derivative of {}'.format(A.name)
     if 'units' in A.attrs and 'units' in p.attrs:
         intAdp.attrs['units']     = '{}/{}'.format(A.units, p.units)

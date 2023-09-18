@@ -137,15 +137,16 @@ class sph_zonal_averager:
         self.Zp_file_out = None # output file location for matrix Zp
          
         # ---- identify matrix output files, apply defaults 
-        if(save_dest is None):
-            save_dest = SAVE_DEST
-        if(grid_name is None):
-            grid_name = 'ncol{}'.format(self.N)
-        self.Z_file_out = '{}/Z_{}_L{}.nc'.format(save_dest, grid_name, L)
-        if(grid_out_name is None):
+        if(self.save_dest is None):
+            self.save_dest = SAVE_DEST
+        if(self.grid_name is None):
+            self.grid_name = 'ncol{}'.format(self.N)
+        self.Z_file_out = '{}/Z_{}_L{}.nc'.format(self.save_dest, self.grid_name, self.L)
+        if(self.grid_out_name is None):
             dlat_out = np.diff(self.lat_out)[0]
-            grid_out_name = '{}deg'.format(dlat_out)
-        self.Zp_file_out = '{}/Zp_{}_{}_L{}.nc'.format(save_dest, grid_name, grid_out_name, L)
+            self.grid_out_name = '{}deg'.format(dlat_out)
+        self.Zp_file_out = '{}/Zp_{}_{}_L{}.nc'.format(self.save_dest, self.grid_name, 
+                                                       self.grid_out_name, self.L)
 
         # ---- read remap matrices, if currently exist on file
         self.sph_compute_matrices(read_only=True)

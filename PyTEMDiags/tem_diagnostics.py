@@ -465,9 +465,25 @@ class TEMDiagnostics:
     @property
     def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
     @property
+    def psi(self): return self._zm_return_func(self._psi)
+    @property
     def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
     @property
-    def int_vbdp(self): return self.zm_return_func(self._int_vbdp)
+    def int_vbdp(self): return self._zm_return_func(self._int_vbdp) 
+    @property
+    def up(self): return self._up
+    @property
+    def vp(self): return self._vp
+    @property
+    def thetap(self): return self._thetap
+    @property
+    def wapp(self): return self._wapp
+    @property
+    def upvp(self): return self._upvp
+    @property
+    def upwapp(self): return self._upwapp
+    @property
+    def vptp(self): return self._vptp
 
 
     # --------------------------------------------------
@@ -570,7 +586,7 @@ class TEMDiagnostics:
         Returns the northward component of the EP flux in m3/s2.
         '''
         # F_Φ = p/p0 * ( a*cos(φ) * (d(bar(u))/dp * ψ - bar(u'*v') ))
-        x = self._multiply_lat(self.dubdp * self._psi - self._upvpb, a*self.coslat)
+        x = self._multiply_lat(self._dub_dp * self._psi - self._upvpb, a*self.coslat)
         return self._multiply_pres(x, self.p/self.p0)
     
     # --------------------------------------------------
@@ -578,7 +594,10 @@ class TEMDiagnostics:
     def epfz(self):
         '''
         Returns the upward component of the EP flux in m3/s2.
-        '''
+        ''' 
+        if(self._ptype == 'var'): f = self.f
+        else: f = self.f[:, np.newaxis, np.newaxis]
+
         # F_z = -H/p0 * a*cos(φ) * (( f - 1/(a*cos(φ)) * d(bar(u)*cos(φ))/dφ )*ψ - bar(u'*ω'))
         x = f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat))
         return -H/self.p0 * self._multiply_lat((x*self._psi - self._upwappb), a*self.coslat)
@@ -591,13 +610,24 @@ class TEMDiagnostics:
         '''
         # ∇ * F = 1/(a * cos(φ)) * d(F_φ*cos(φ))/dφ + d(F_p)/dp
         Fphi = self.epfy()
-        Fp   = -self.p0/H * self.epfz()
+        Fp   = self.epfz()
        
         Fphicoslat       = self._multiply_lat(Fphi, self.coslat)
         dFphicoslat_dlat = lat_gradient(Fphicoslat, self.lat)
-        dFp_dp           = self_.p_gradient(Fp, self.p)
+        dFp_dp           = self._p_gradient(Fp, self.p)
         
         return self._multiply_lat(dFphicoslat_dlat, 1/(a*self.coslat)) + dFp_dp
+ 
+
+    # --------------------------------------------------
+
+    def epdivi_z(self):
+        '''
+        Returns the EP flux divergence.
+        '''
+        # ∇(z) * F = p/p0 * (∇ * F)
+        divF = self.epdiv() 
+        return self._multiply_pres(divF, self.p/self.p0)
     
     # --------------------------------------------------
 
@@ -610,12 +640,22 @@ class TEMDiagnostics:
     
     # --------------------------------------------------
 
+    def omegatem(self):
+        '''
+        Returns the TEM upward wind in Pa/s.
+        '''
+        # bar(ω)* = bar(ω) + 1/(a*cos(φ)) * d(ψ*cos(φ))/dφ
+        return self._wapb + self._multiply_lat(self._dpsicoslat_dlat, 1/(a*self.coslat))
+    
+    # --------------------------------------------------
+
     def wtem(self):
         '''
         Returns the TEM upward wind in m/s.
         '''
         # bar(ω)* = bar(ω) + 1/(a*cos(φ)) * d(ψ*cos(φ))/dφ
-        return self._wapb + self._multiply_lat(self._dpsicoslat_dlat, 1/(a*self.coslat))
+        # -> bar(w)* = -H/p * bar(ω)*
+        return self._multiply_pres(self.omegatem(), -H/self.p)
     
     # --------------------------------------------------
 
@@ -624,7 +664,7 @@ class TEMDiagnostics:
         Returns the TEM mass stream function in kg/s.
         '''
         # Ψ(p) = 2π*a*cos(φ)/g * (int_p^0[bar(v)dp] - ψ)
-        return 2*pi*a/g0 * self._multiply_lat(self._int_vbdp - self._psi, self.zm_coslat)
+        return 2*pi*a/g0 * self._multiply_lat(self._int_vbdp - self._psi, self.coslat)
     
     # --------------------------------------------------
  
@@ -643,9 +683,12 @@ class TEMDiagnostics:
         Returns the tendency of eastward wind due to TEM northward wind advection 
         and coriolis in m/s2.
         '''
+        if(self._ptype == 'var'): f = self.f
+        else: f = self.f[:, np.newaxis, np.newaxis]
+        
         # d(bar(u))/dt|_adv(bar(v)*) = bar(v)* * (f - 1/(a*cos(φ)) * d(bar(u)cos(φ))/dφ)
         vstar = self.vtem()
-        diff = (self.zm_f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat)))
+        diff = (f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat)))
         return vstar * diff
     
     # --------------------------------------------------
@@ -655,8 +698,49 @@ class TEMDiagnostics:
         Returns the tendency of eastward wind due to TEM upward wind advection in m/s2.
         ''' 
         # d(bar(u))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(u)/dp
-        wstar = self.wtem
+        wstar = self.omegatem()
         return -wstar * self._dub_dp
+    
+
+    # --------------------------------------------------
+
+
+    def to_netcdf(self, loc=os.getcwd(), include_attrs=False):
+        '''
+        Saves all TEM quantities computed by this class to a NetCDF file.
+
+        Parameters
+        ----------
+        loc : str, optional
+            Location to sace the file. Defaults to the current working directory
+        includ_attrs : bool, optional
+            Whether or not to write out all of the attributes of this object. 
+            Defaults to false, in which case only the quantities computed by
+            the class methods are written.
+        ''' 
+         
+        attrs = {"ub":self.ub , "up":self.up, "vb":self.vb , "vp":self.vp,
+                 "thetab":self.thetab , "thetap":self.thetap, "wapb":self.wapb , 
+                 "wawpp":self.wapp, "upvp":self.upvp , "upvpb":self.upvpb, 
+                 "upwapp":self.upwapp , "upwappb":self.upwappb,"vptp":self.vptp , 
+                 "vptpb":self.vptpb, "dub_dp":self.dub_dp, "dthetab_dp":self.dthetab_dp,
+                 "dubcoslat_dlat":self.dubcoslat_dlat , "psi":self.psi, 
+                 "dpsicoslat_dlat":self.dpsicoslat_dlat, "dpsi_dp":self.dpsi_dp, 
+                 "int_vbdp":self.int_vbdp}
+        results = {"epfy":self.epfy() , "epfz":self.epfz(), "epdiv":self.epdiv() , 
+                   "vtem":self.vtem(), "omegatem":self.omegatem(), "wtem":self.wtem() , 
+                   "psitem":self.psitem(), "utendepfd":self.utendepfd() , 
+                   "utendvtem":self.utendvtem(), "utendwtem":self.utendwtem()}
+        if(include_attrs):
+            output = dict(attrs, **results)
+        else:
+            output = results
+
+        filename = 'TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(
+                   self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
+                   self.zm_pole_points, include_attrs)
+        dataset = xr.Dataset(output)
+        dataset.to_netcdf('{}/{}'.format(loc, filename))
         
 
 # =========================================================================

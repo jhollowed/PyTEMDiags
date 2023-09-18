@@ -10,4 +10,5 @@ g0 = 9.80665    # global average of gravity at mean sea level in m/s^2
 a  = 6.37123e6  # radius of Earth in m
 Om = 7.29212e-5 # rotation rate of Earth in 1/s
 k  = R/Cp       # ratio of gas constant to specific heat, dimensionless
+H  = 7*1e3      # scale height of 7km
 pi = 3.14159
