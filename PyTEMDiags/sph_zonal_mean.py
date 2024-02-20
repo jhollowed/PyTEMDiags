@@ -54,7 +54,7 @@ class sph_zonal_averager:
         Parameters
         ----------
         lat : 1D array
-            Unstructured vector of N latitudes of the native data.
+            Unstructured vector of N latitudes of the native data, in degrees.
         lat_out : 1D array
             Output latitudes, in degrees.
         L : int

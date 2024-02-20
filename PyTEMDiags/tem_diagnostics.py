@@ -171,6 +171,9 @@ class TEMDiagnostics:
         vptpb : N-D array
             Zonal mean of vptp in (m K)/s, matching length of lat_zm in the horizontal, 
             otherwise matching dims of input va.
+        out_file : str
+            Output filename, used for naming data files written by the to_netcdf() method. 
+            Simple string that contains metadata about the current TEM option configuration.
         '''
 
         self._logger = util.logger(debug, header=True)
@@ -221,6 +224,9 @@ class TEMDiagnostics:
         # ---- compute fluxes, vertical and meridional derivaties, streamfunction terms
         self._compute_fluxes()
         self._compute_derivatives()
+        
+        # ---- output filename used by self.to_netcdf()
+        self._out_file = None
      
     
     # --------------------------------------------------
@@ -330,10 +336,10 @@ class TEMDiagnostics:
                                                                 self.zm_dlat, self.lat_zm))
         
         # --- get latitude-based quantities
-        self._f_native = 2*Om*np.sin(self.lat_native) # coriolis parameter on native grid
-        self._f_zm     = 2*Om*np.sin(self.lat_zm)     # coriolis parameter on zonal mean grid
-        self._coslat_native = np.cos(self.lat_native) # cosine of latitude
-        self._coslat_zm     = np.cos(self.lat_zm)     # cosine of latitude
+        self._f_native = 2*Om*np.sin(self.lat_native * np.pi/180) # coriolis parameter on native grid
+        self._f_zm     = 2*Om*np.sin(self.lat_zm * np.pi/180)     # coriolis parameter on zonal mean grid
+        self._coslat_native = np.cos(self.lat_native * np.pi/180) # cosine of latitude on native grid
+        self._coslat_zm     = np.cos(self.lat_zm * np.pi/180)     # cosine of latitude on zonal mean grid
 
         # ---- transform pressure p to a coordinate if needed
         # If the pressure was input as a 3D variable, but the pressure is unfiorm on each
@@ -462,7 +468,11 @@ class TEMDiagnostics:
     @property
     def dthetab_dp(self): return self._zm_return_func(self._dthetab_dp)
     @property
+    def ubcoslat(self): return self._zm_return_func(self._ubcoslat)
+    @property
     def dubcoslat_dlat(self): return self._zm_return_func(self._dubcoslat_dlat)
+    @property
+    def psicoslat(self): return self._zm_return_func(self._psicoslat)
     @property
     def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
     @property
@@ -485,6 +495,11 @@ class TEMDiagnostics:
     def upwapp(self): return self._upwapp
     @property
     def vptp(self): return self._vptp
+    @property
+    def out_file(self): 
+        if(self._out_file is None):
+            warnings.warn('\'out_file\' is not set until to_netcdf() is called')
+        return self._out_file
     
     def epfy(self): return self._zm_return_func(self._epfy())
     def epfz(self): return self._zm_return_func(self._epfz())
@@ -492,6 +507,7 @@ class TEMDiagnostics:
     def vtem(self): return self._zm_return_func(self._vtem())
     def omegatem(self): return self._zm_return_func(self._omegatem())
     def wtem(self): return self._zm_return_func(self._wtem())
+    def omegatem(self): return self._zm_return_func(self._omegatem())
     def psitem(self): return self._zm_return_func(self._psitem())
     def utendepfd(self): return self._zm_return_func(self._utendepfd())
     def utendvtem(self): return self._zm_return_func(self._utendvtem())
@@ -577,13 +593,13 @@ class TEMDiagnostics:
         self._dub_dp          = self._p_gradient(self._ub, self.p, self._logger)
         self._dthetab_dp      = self._p_gradient(self._thetab, self.p, self._logger)
 
-        ubcoslat                   = self._multiply_lat(self._ub, self.coslat)
-        self._dubcoslat_dlat       = lat_gradient(ubcoslat, self.lat)
+        self._ubcoslat        = self._multiply_lat(self._ub, self.coslat)
+        self._dubcoslat_dlat  = lat_gradient(self._ubcoslat, self.lat)
         
         # ψ = bar(v'* θ') / (dθ'/dp)
         self._psi                  = self._vptpb / self._dthetab_dp 
-        psicoslat                  = self._multiply_lat(self._psi, self.coslat)
-        self._dpsicoslat_dlat      = lat_gradient(psicoslat, self.lat)
+        self._psicoslat            = self._multiply_lat(self._psi, self.coslat)
+        self._dpsicoslat_dlat      = lat_gradient(self._psicoslat, self.lat)
         self._dpsi_dp              = self._p_gradient(self._psi, self.p, self._logger) 
        
         self._int_vbdp  = self._p_integral(self._vb, self.p, self._logger)
@@ -724,7 +740,8 @@ class TEMDiagnostics:
                  "wawpp":self.wapp, "upvp":self.upvp , "upvpb":self.upvpb, 
                  "upwapp":self.upwapp , "upwappb":self.upwappb,"vptp":self.vptp , 
                  "vptpb":self.vptpb, "dub_dp":self.dub_dp, "dthetab_dp":self.dthetab_dp,
-                 "dubcoslat_dlat":self.dubcoslat_dlat , "psi":self.psi, 
+                 "ubcoslat":self.ubcoslat, "dubcoslat_dlat":self.dubcoslat_dlat, 
+                 "psi":self.psi, "psicoslat":self.psicoslat,
                  "dpsicoslat_dlat":self.dpsicoslat_dlat, "dpsi_dp":self.dpsi_dp, 
                  "int_vbdp":self.int_vbdp}
         results = {"epfy":self.epfy() , "epfz":self.epfz(), "epdiv":self.epdiv() , 
@@ -735,12 +752,15 @@ class TEMDiagnostics:
             output = dict(attrs, **results)
         else:
             output = results
+        
+        filename       = 'TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(
+                         self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
+                         self.zm_pole_points, include_attrs)
+        self._out_file = '{}/{}'.format(loc, filename)
 
-        filename = 'TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(
-                   self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
-                   self.zm_pole_points, include_attrs)
         dataset = xr.Dataset(output)
-        dataset.to_netcdf('{}/{}'.format(loc, filename))
+        dataset.to_netcdf(self._out_file)
+        self._logger.print('wrote TEM data to {}'.format(self._out_file))
         
 
 # =========================================================================
