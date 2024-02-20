@@ -15,8 +15,8 @@ import pathlib
 import warnings
 import numpy as np
 import xarray as xr
+from scipy.special import sph_harm
 from scipy.linalg import lstsq as lstsq
-from scipy.special import eval_legendre as legendre
 
 # ---- imports from this package
 from .tem_util import *
@@ -34,7 +34,7 @@ NCENC = {'_FillValue':None}
 
 class sph_zonal_averager:
     def __init__(self, lat, lat_out, L, grid_name=None, grid_out_name=None, save_dest=None,
-                 ncoldim='ncol', debug=False):
+                 ncoldim='ncol', debug=False, overwrite=False, nowrite=False):
         '''
         This class provides an interface for taking zonal averages of fields provided
         on unstructured datasets on the globe using a spherical harmonic decomposition 
@@ -82,6 +82,9 @@ class sph_zonal_averager:
             name of horizontal dimension. Defaults to 'ncol'
         debug : bool, optional
             Whether or not to print progress statements to stdout.
+        overwrite : bool, optional
+            Whether or not to force re-computation and overwriting, if a filename 
+            corresponding to this execution of the function already exists. 
 
         Public Methods
         --------------
@@ -123,13 +126,15 @@ class sph_zonal_averager:
         self.save_dest = save_dest         # save location for matric netcdf files
         self.ncoldim = ncoldim             # name of horizontal dimension for input data
 
-        # if lat was passed as a DataArray, extract values
+        # if lats were passed as a DataArray, extract values
         if(isinstance(self.lat, xr.core.dataarray.DataArray)): 
             self.lat = self.lat.values
+        if(isinstance(self.lat_out, xr.core.dataarray.DataArray)): 
+            self.lat_out = self.lat_out.values
         
         # ---- declare variables
         self.N = len(lat)       # number of input latitudes
-        self.M = len(lat_out)   # number of optional output latitudes
+        self.M = len(lat_out)   # number of output latitudes
         self.l = np.arange(L+1) # spherical harmonic degree 0->L
         self.Z = None           # zonal averageing matrix (native -> native)
         self.Zp = None          # zonal remap matrix (native -> output)
@@ -149,7 +154,7 @@ class sph_zonal_averager:
                                                        self.grid_out_name, self.L)
 
         # ---- read remap matrices, if currently exist on file
-        self.sph_compute_matrices(read_only=True)
+        self.sph_compute_matrices(read_only=True, overwrite=overwrite)
  
 
     # --------------------------------------------------
@@ -190,6 +195,8 @@ class sph_zonal_averager:
             raise RuntimeError('Matrices Z and/or Zp are undefined; either verify grid_name,'\
                                'grid_name_out, and save_dest, or call sph_compute_matrices()'\
                                'before sph_zonal_mean() or sph_zonal_mean_native()!')
+        if(not isinstance(A, xr.core.dataarray.DataArray)):
+            raise RuntimeError('Variable A must be an xarray DataArray!')
 
         # ---- A will have been passed by refernce; 
         #      make copy of the data object for modification
@@ -206,9 +213,11 @@ class sph_zonal_averager:
             raise RuntimeError('(sph_zonal_mean_generic() Expected the first (leftmost) '\
                                'dimension of variable {} to be {} of length {}'.format(
                                                           A.name, self.ncoldim, self.N))
+
         # ---- extract and reshape data for averaging
         AA = A.values
-        DD = np.prod(shape[1:])  # outer dimension of data
+        if(len(dims) == 1): DD = 1
+        else:               DD = np.prod(shape[1:])  # outer dimension of data
         AA = AA.reshape((self.N, DD))
         self.logger.print('Reshaped variable {}: {} -> {}'.format(A.name, shape, AA.shape))
         
@@ -258,7 +267,7 @@ class sph_zonal_averager:
     # --------------------------------------------------
 
 
-    def sph_compute_matrices(self, overwrite=False, read_only=False):
+    def sph_compute_matrices(self, overwrite=False, read_only=False, no_write=False):
         '''
         Generates the zonal "averaging matrix" and "remap matrix"  using spherical harmonic 
         decomposition, given latitudes and degree (L).
@@ -276,10 +285,14 @@ class sph_zonal_averager:
             If True, only allow this function to load in the matrices from
             file. If the files don't exist, return rather than computing 
             them. Defaults to False.
+        no_write : bool, optional
+            If True, do not write remap matrices to file; compute_sph_matrices 
+            will instead only return the matrices as 2D arrays to caller. 
+            Defaults to False.
 
         Returns
         -------
-        Z, or [Z, Zp] : NxN array, or list of [NxN, MxM] arrays
+        [Z, Zp] : list of [NxN, MxM] arrays
             Z:  The resulting square (NxN) zonal averaging matrix.
             Zp: The resulting non-square (MxN) zonal averaging remap matrix.
         '''
@@ -303,20 +316,19 @@ class sph_zonal_averager:
                           '= ({} x {}), L = {}'.format(self.M, self.N, self.L))
      
         # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the input lats
-        Y0 = np.zeros((self.N, self.L+1))    # matrix to store spherical harmonics on input lats
-        sinlat = np.sin(np.deg2rad(self.lat))
         self.logger.print('building Y0...')
+        Y0 = np.zeros((self.N, self.L+1)) # matrix to store spherical harmonics on input lats
+        coalt = np.deg2rad(90 - self.lat) # the coaltitude (0 at NP, 180 at SP) in radians
         for ll in self.l:
-            coef = np.sqrt(((2*ll+1)/(4*pi)))
-            Y0[:,ll] = coef * legendre(ll, sinlat)
+            Y0[:,ll] = sph_harm(0, ll, 0, coalt).real
 
         # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the output lats
-        Y0p = np.zeros((self.M, self.L+1))   # matrix to store spherical harmonics on output lats
-        sinlat = np.sin(np.deg2rad(self.lat_out))
+
         self.logger.print('building Y0\'...')
+        Y0p = np.zeros((self.M, self.L+1))    # matrix to store spherical harmonics on input lats
+        coalt = np.deg2rad(90 - self.lat_out) # the coaltitude (0 at NP, 180 at SP) in radians
         for ll in self.l:
-            coef = np.sqrt(((2*ll+1)/(4*pi)))
-            Y0p[:,ll] = coef * legendre(ll, sinlat)
+            Y0p[:,ll] = sph_harm(0, ll, 0, coalt).real
 
         # ---- construct the remap matrices
         #
@@ -345,30 +357,31 @@ class sph_zonal_averager:
         Z_da.attrs['long_name'] = 'Averaging matrix Z for grid {}'.format(self.grid_name)
         Z_da['lat_row'].attrs['units'] = 'degrees'
         Z_da['lat_col'].attrs['units'] = 'degrees'
-        Z_da.to_netcdf(self.Z_file_out, encoding={'Z':NCENC,'lat_row':NCENC,'lat_col':NCENC})
-        self.logger.print('Z wrote to file {}'.format(self.Z_file_out))
+        if(not no_write):
+            Z_da.to_netcdf(self.Z_file_out, encoding={'Z':NCENC,'lat_row':NCENC,'lat_col':NCENC})
+            self.logger.print('Z wrote to file {}'.format(self.Z_file_out))
 
         # -- build Z'
         self.logger.print('taking Z\' = Y0\'*inv(Y0)...', with_timer=True)
         Zp = np.matmul(Y0p, Y0inv)
         self.logger.timer()
-        
+       
         # -- write out Z'
         Zp_da  = xr.DataArray(Zp, dims=('lat_row','lat_col'),
-                                 coords={'lat_row': self.lat_out, 
-                                         'lat_col':self.lat})
+                                  coords={'lat_row': self.lat_out, 
+                                          'lat_col': self.lat})
         Zp_da.name = 'Zp'
         Zp_da.attrs['long_name'] = 'Remap matrix Z\' for grid {}'.format(self.grid_name)
         Zp_da['lat_row'].attrs['units'] = 'degrees'
         Zp_da['lat_col'].attrs['units'] = 'degrees'
-        Zp_da.to_netcdf(self.Zp_file_out, encoding={'Zp':NCENC,'lat_row':NCENC,'lat_col':NCENC})
-
-        self.logger.print('Zp wrote to file {}'.format(self.Zp_file_out))
+        if(not no_write):
+            Zp_da.to_netcdf(self.Zp_file_out, encoding={'Zp':NCENC,'lat_row':NCENC,'lat_col':NCENC})
+            self.logger.print('Zp wrote to file {}'.format(self.Zp_file_out))
         
         # -- done; export to class namespace and return
         self.Z = Z
         self.Zp = Zp
-        return
+        return [Z, Zp]
 
 
 # -------------------------------------------------------------------------

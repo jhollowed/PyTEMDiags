@@ -203,8 +203,9 @@ class TEMDiagnostics:
         
         # ---- construct zonal averaging obeject
         self._logger.print('Getting zonal averaging matrices...')
-        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L, 
-                                     grid_name, zm_grid_name, map_save_dest, debug=debug)
+        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L,  
+                                     grid_name, zm_grid_name, map_save_dest, 
+                                     debug=debug, overwrite=overwrite_map)
         if(self.ZM.Z is None or self.ZM.Zp is None):
             self.ZM.sph_compute_matrices(overwrite=overwrite_map)
 
@@ -484,7 +485,17 @@ class TEMDiagnostics:
     def upwapp(self): return self._upwapp
     @property
     def vptp(self): return self._vptp
-
+    
+    def epfy(self): return self._zm_return_func(self._epfy())
+    def epfz(self): return self._zm_return_func(self._epfz())
+    def epdiv(self): return self._zm_return_func(self._epdiv())
+    def vtem(self): return self._zm_return_func(self._vtem())
+    def omegatem(self): return self._zm_return_func(self._omegatem())
+    def wtem(self): return self._zm_return_func(self._wtem())
+    def psitem(self): return self._zm_return_func(self._psitem())
+    def utendepfd(self): return self._zm_return_func(self._utendepfd())
+    def utendvtem(self): return self._zm_return_func(self._utendvtem())
+    def utendwtem(self): return self._zm_return_func(self._utendwtem())
 
     # --------------------------------------------------
     
@@ -581,7 +592,7 @@ class TEMDiagnostics:
     # --------------------------------------------------
 
 
-    def epfy(self):
+    def _epfy(self):
         '''
         Returns the northward component of the EP flux in m3/s2.
         '''
@@ -591,7 +602,7 @@ class TEMDiagnostics:
     
     # --------------------------------------------------
 
-    def epfz(self):
+    def _epfz(self):
         '''
         Returns the upward component of the EP flux in m3/s2.
         ''' 
@@ -604,34 +615,23 @@ class TEMDiagnostics:
     
     # --------------------------------------------------
 
-    def epdiv(self):
+    def _epdiv(self):
         '''
         Returns the EP flux divergence.
         '''
         # ∇ * F = 1/(a * cos(φ)) * d(F_φ*cos(φ))/dφ + d(F_p)/dp
-        Fphi = self.epfy()
-        Fp   = self.epfz()
+        Fphi = self._epfy()
+        Fp   = self._epfz() * -self.p0/H
        
         Fphicoslat       = self._multiply_lat(Fphi, self.coslat)
         dFphicoslat_dlat = lat_gradient(Fphicoslat, self.lat)
         dFp_dp           = self._p_gradient(Fp, self.p)
         
         return self._multiply_lat(dFphicoslat_dlat, 1/(a*self.coslat)) + dFp_dp
- 
-
+  
     # --------------------------------------------------
 
-    def epdivi_z(self):
-        '''
-        Returns the EP flux divergence.
-        '''
-        # ∇(z) * F = p/p0 * (∇ * F)
-        divF = self.epdiv() 
-        return self._multiply_pres(divF, self.p/self.p0)
-    
-    # --------------------------------------------------
-
-    def vtem(self):
+    def _vtem(self):
         '''
         Returns the TEM northward wind in m/s.
         '''
@@ -640,7 +640,7 @@ class TEMDiagnostics:
     
     # --------------------------------------------------
 
-    def omegatem(self):
+    def _omegatem(self):
         '''
         Returns the TEM upward wind in Pa/s.
         '''
@@ -649,17 +649,17 @@ class TEMDiagnostics:
     
     # --------------------------------------------------
 
-    def wtem(self):
+    def _wtem(self):
         '''
         Returns the TEM upward wind in m/s.
         '''
         # bar(ω)* = bar(ω) + 1/(a*cos(φ)) * d(ψ*cos(φ))/dφ
         # -> bar(w)* = -H/p * bar(ω)*
-        return self._multiply_pres(self.omegatem(), -H/self.p)
+        return self._multiply_pres(self._omegatem(), -H/self.p)
     
     # --------------------------------------------------
 
-    def psitem(self):
+    def _psitem(self):
         '''
         Returns the TEM mass stream function in kg/s.
         '''
@@ -668,17 +668,17 @@ class TEMDiagnostics:
     
     # --------------------------------------------------
  
-    def utendepfd(self):
+    def _utendepfd(self):
         '''
         Returns the tendency of eastward wind due to EP flux divergence in m/s2.
         '''
         # d(bar(u))/dt|_(∇ * F) = (∇ * F) / (a*cos(φ))
-        return self._multiply_lat(self.epdiv(), 1/(a * self.coslat))
+        return self._multiply_lat(self._epdiv(), 1/(a * self.coslat))
 
     
     # --------------------------------------------------
  
-    def utendvtem(self):
+    def _utendvtem(self):
         '''
         Returns the tendency of eastward wind due to TEM northward wind advection 
         and coriolis in m/s2.
@@ -687,18 +687,18 @@ class TEMDiagnostics:
         else: f = self.f[:, np.newaxis, np.newaxis]
         
         # d(bar(u))/dt|_adv(bar(v)*) = bar(v)* * (f - 1/(a*cos(φ)) * d(bar(u)cos(φ))/dφ)
-        vstar = self.vtem()
+        vstar = self._vtem()
         diff = (f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat)))
         return vstar * diff
     
     # --------------------------------------------------
 
-    def utendwtem(self):
+    def _utendwtem(self):
         '''
         Returns the tendency of eastward wind due to TEM upward wind advection in m/s2.
         ''' 
         # d(bar(u))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(u)/dp
-        wstar = self.omegatem()
+        wstar = self._omegatem()
         return -wstar * self._dub_dp
     
 

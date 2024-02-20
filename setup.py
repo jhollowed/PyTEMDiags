@@ -12,4 +12,6 @@ setup(name='PyTEMDiags',
       author='Joe Hollowed',
       author_email='hollowed@umich.edu',
       packages=['PyTEMDiags'],
-      zip_safe=False)
+      zip_safe=False,
+      test_suite='nose.collector',
+      tests_require=['nose'])
