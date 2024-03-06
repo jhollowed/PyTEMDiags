@@ -33,7 +33,7 @@ NCENC = {'_FillValue':None}
 
 
 class sph_zonal_averager:
-    def __init__(self, lat, lat_out, L, grid_name=None, grid_out_name=None, save_dest=None,
+    def __init__(self, lat, lat_out, weights, L, grid_name=None, grid_out_name=None, save_dest=None,
                  ncoldim='ncol', debug=False, overwrite=False, nowrite=False):
         '''
         This class provides an interface for taking zonal averages of fields provided
@@ -57,6 +57,8 @@ class sph_zonal_averager:
             Unstructured vector of N latitudes of the native data, in degrees.
         lat_out : 1D array
             Output latitudes, in degrees.
+        weights : 1D array
+            Unstructured vector of N grid area weights for the grid positions lat
         L : int
             Maximum spherical harmonic order.
         grid_name : str, optional
@@ -121,6 +123,7 @@ class sph_zonal_averager:
         self.L = L                         # max. spherical harmonic order  
         self.lat = lat                     # input latitudes [deg]
         self.lat_out = lat_out             # output latitudes [deg]
+        self.weights = weights             # grid area weights
         self.grid_name = grid_name         # name of native (input) grid
         self.grid_out_name = grid_out_name # name of optional output grid
         self.save_dest = save_dest         # save location for matric netcdf files
@@ -136,6 +139,7 @@ class sph_zonal_averager:
         self.N = len(lat)       # number of input latitudes
         self.M = len(lat_out)   # number of output latitudes
         self.l = np.arange(L+1) # spherical harmonic degree 0->L
+        self.diagw = None       # diagonal weight matrix
         self.Z = None           # zonal averageing matrix (native -> native)
         self.Zp = None          # zonal remap matrix (native -> output)
         self.Z_file_out = None  # output file location for matrix Z
@@ -309,12 +313,17 @@ class sph_zonal_averager:
             return
         except FileNotFoundError:
             if(read_only):
-                return
-            
+                return 
         
         self.logger.print('called sph_compute_matrices() for (M x N) '\
                           '= ({} x {}), L = {}'.format(self.M, self.N, self.L))
-     
+
+        # ---- place the grid area weights on the diagonal NxN matrix
+        if(len(self.weights) != len(self.lat)):
+            raise RuntimeError('number of weights must equal number of native grid latitudes!')
+        self.logger.print('building diag(w)...')
+        self.diagw = np.diag(self.weights)
+
         # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the input lats
         self.logger.print('building Y0...')
         Y0 = np.zeros((self.N, self.L+1)) # matrix to store spherical harmonics on input lats
@@ -323,7 +332,6 @@ class sph_zonal_averager:
             Y0[:,ll] = sph_harm(0, ll, 0, coalt).real
 
         # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the output lats
-
         self.logger.print('building Y0\'...')
         Y0p = np.zeros((self.M, self.L+1))    # matrix to store spherical harmonics on input lats
         coalt = np.deg2rad(90 - self.lat_out) # the coaltitude (0 at NP, 180 at SP) in radians
@@ -341,10 +349,14 @@ class sph_zonal_averager:
         # completeness, we name the variable, dimensions, and provide a long name.
        
         # -- build Z
-        self.logger.print('inverting Y0...', with_timer=True)
-        Y0inv = lstsq(Y0, np.identity(self.N))[0]
+        #self.logger.print('inverting Y0...', with_timer=True)
+        #Y0inv = lstsq(Y0, np.identity(self.N))[0]
+        #self.logger.timer()
+        self.logger.print('building inv(Y0) = Y^T diag(w)...', with_timer=True)
+        Y0inv = np.matmul(Υ0.Τ, self.diagw)
         self.logger.timer()
-        
+        psb.set_trace()
+ 
         self.logger.print('taking Z = Y0*inv(Y0)...', with_timer=True)
         Z     = np.matmul(Y0, Y0inv)
         self.logger.timer()

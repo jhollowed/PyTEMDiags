@@ -28,7 +28,7 @@ DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
 
 
 class TEMDiagnostics:
-    def __init__(self, ua, va, ta, wap, p, lat_native, p0=P0, zm_dlat=1, L=150, 
+    def __init__(self, ua, va, ta, wap, p, lat_native, lat_weights, p0=P0, zm_dlat=1, L=150, 
                  dim_names=DEFAULT_DIMS, log_pressure=True, grid_name=None, 
                  zm_grid_name=None, map_save_dest=None, overwrite_map=False, 
                  zm_pole_points=False, debug=False):
@@ -65,6 +65,8 @@ class TEMDiagnostics:
             quantities, thus the computations are slower.
         lat_native : xarray DataArray
             Latitudes in degrees.
+        lat_weights : xarray DataArray
+            Grid cell areas corresponding to grid cells at latitudes lat_native, in any units.
         p0 : float
             Reference pressure in Pa. Defaults to the DynVarMIP value in constants.py
         zm_dlat : float, optional
@@ -186,7 +188,8 @@ class TEMDiagnostics:
         self.ta   = ta   # temperature [K]
         self.wap  = wap  # vertical pressure velocity [Pa/s]
         self.p0   = p0   # reference pressure [Pa]
-        self.lat_native = lat_native  # latitudes [deg]
+        self.lat_native  = lat_native  # latitudes [deg]
+        self.lat_weights = lat_weights  # latitude weights (grid cell areas)
         # options
         self.L              = L
         self.debug          = debug
@@ -206,7 +209,7 @@ class TEMDiagnostics:
         
         # ---- construct zonal averaging obeject
         self._logger.print('Getting zonal averaging matrices...')
-        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L,  
+        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.lat_weights, self.L,  
                                      grid_name, zm_grid_name, map_save_dest, 
                                      debug=debug, overwrite=overwrite_map)
         if(self.ZM.Z is None or self.ZM.Zp is None):
