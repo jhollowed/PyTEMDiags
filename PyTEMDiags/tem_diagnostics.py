@@ -24,14 +24,15 @@ from .sph_zonal_mean import *
 # ---- global constants
 DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
 
+
 # -------------------------------------------------------------------------
 
 
 class TEMDiagnostics:
-    def __init__(self, ua, va, ta, wap, p, lat_native, lat_weights, p0=P0, zm_dlat=1, L=150, 
-                 dim_names=DEFAULT_DIMS, log_pressure=True, grid_name=None, 
-                 zm_grid_name=None, map_save_dest=None, overwrite_map=False, 
-                 zm_pole_points=False, debug=False):
+    def __init__(self, ua, va, ta, wap, p, lat_native, p0=P0, zm_dlat=1, L=150, 
+                 lat_weights=None, dim_names=DEFAULT_DIMS, log_pressure=True, 
+                 grid_name=None, zm_grid_name=None, map_save_dest=None, 
+                 overwrite_map=False, zm_pole_points=False, debug=False):
         '''
         This class provides interfaces for computing TEM diagnostic quantities, assuming 
         either a log-pressure (the default) or pure-pressure vertical coordinate. Upon 
@@ -209,9 +210,11 @@ class TEMDiagnostics:
         
         # ---- construct zonal averaging obeject
         self._logger.print('Getting zonal averaging matrices...')
-        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.lat_weights, self.L,  
-                                     grid_name, zm_grid_name, map_save_dest, 
-                                     debug=debug, overwrite=overwrite_map)
+        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L, 
+                                     weights=self.lat_weights,  
+                                     grid_name=grid_name, grid_out_name=zm_grid_name, 
+                                     save_dest=map_save_dest, debug=debug, 
+                                     overwriteZ=overwrite_map)
         if(self.ZM.Z is None or self.ZM.Zp is None):
             self.ZM.sph_compute_matrices(overwrite=overwrite_map)
 
@@ -231,9 +234,7 @@ class TEMDiagnostics:
         # ---- output filename used by self.to_netcdf()
         self._out_file = None
      
-    
     # --------------------------------------------------
-
 
     def _config_dims(self):
         '''
@@ -377,11 +378,8 @@ class TEMDiagnostics:
                                '(such that the model top is the leftmost entry in the '\
                                'pressure data array)')
             
-    
-
     # --------------------------------------------------
     
-
     def _config_functions(self):
         '''
         Depending on ptype (whether pressure p was input as a coordinate or a variable), 
@@ -436,9 +434,7 @@ class TEMDiagnostics:
             self._logger.print('configuration set for pressure p as a variable')
         self._multiply_lat = util.multiply_lat #(k)
     
-
     # --------------------------------------------------
-    
 
     '''
     Below are a set of getter functions for all zonally-averaged quantities.
@@ -518,7 +514,6 @@ class TEMDiagnostics:
 
     # --------------------------------------------------
     
-
     def _compute_potential_temperature(self):
         '''
         Computes the potential temperature from temperature and pressure.
@@ -536,9 +531,7 @@ class TEMDiagnostics:
         try: del self.theta.attrs['standard_name']
         except KeyError: pass
 
-
     # --------------------------------------------------
-    
 
     def _decompose_zm_eddy(self):
         '''
@@ -562,9 +555,7 @@ class TEMDiagnostics:
         self._wapp        = self.wap - self.ZM.sph_zonal_mean_native(self.wap)
         self._wapp.name   = 'wapp'
     
-
     # --------------------------------------------------
-    
 
     def _compute_fluxes(self):
         '''
@@ -584,10 +575,8 @@ class TEMDiagnostics:
         self._vptpb        = self._zonal_mean(self._vptp)
         self._vptpb.name   = 'vptpb'
     
-
     # --------------------------------------------------
     
-
     def _compute_derivatives(self):
         '''
         Computes vertical and meridional derivatives, and their zonal averages.
@@ -607,9 +596,7 @@ class TEMDiagnostics:
        
         self._int_vbdp  = self._p_integral(self._vb, self.p, self._logger)
 
-
     # --------------------------------------------------
-
 
     def _epfy(self):
         '''
@@ -718,11 +705,9 @@ class TEMDiagnostics:
         ''' 
         # d(bar(u))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(u)/dp
         wstar = self._omegatem()
-        return -wstar * self._dub_dp
-    
+        return -wstar * self._dub_dp 
 
     # --------------------------------------------------
-
 
     def to_netcdf(self, loc=os.getcwd(), include_attrs=False):
         '''

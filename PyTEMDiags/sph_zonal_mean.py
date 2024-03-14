@@ -33,8 +33,8 @@ NCENC = {'_FillValue':None}
 
 
 class sph_zonal_averager:
-    def __init__(self, lat, lat_out, weights, L, grid_name=None, grid_out_name=None, save_dest=None,
-                 ncoldim='ncol', debug=False, overwrite=False, nowrite=False):
+    def __init__(self, lat, lat_out, L, weights=None, grid_name=None, grid_out_name=None, 
+                 ncoldim='ncol', overwriteZ=False, save_dest=None, debug=False):
         '''
         This class provides an interface for taking zonal averages of fields provided
         on unstructured datasets on the globe using a spherical harmonic decomposition 
@@ -57,10 +57,18 @@ class sph_zonal_averager:
             Unstructured vector of N latitudes of the native data, in degrees.
         lat_out : 1D array
             Output latitudes, in degrees.
-        weights : 1D array
-            Unstructured vector of N grid area weights for the grid positions lat
         L : int
             Maximum spherical harmonic order.
+        weights : 1D array or string, optional
+            Unstructured vector of N grid area weights for the grid positions lat. These 
+            weights must sum to one (each weight is a fractional surface area of the unit 
+            sphere).
+            Defaults to None, in which case the weights are solved for by a least-squares
+            based matrix inversion. Providing these weights will allow a much faster
+            and memory-efficient calculation by avoiding the need for this matrix inversion. 
+            If weights are not available to be passed, the result of the  inversion method 
+            will be written out to file so that subsequent usage of this utility with the 
+            same pair of input and output grids will be fast.
         grid_name : str, optional
             Name of the native grid. Used for naming the file which the
             averaging and remap matrices will be saved to, as:
@@ -74,19 +82,20 @@ class sph_zonal_averager:
             (that is, this default naming scheme implies that lat_out is uniform)
             If lat_out is not provided, then this argument will be 
             ignored if passed.
+        ncoldim : str, optional
+            name of horizontal dimension. Defaults to 'ncol'
+        overwriteZ : bool, optional
+            Whether or not to force re-computation and overwriting of the Z and Z' 
+            matrices on file, if a filename corresponding to this execution of the 
+            function already exists. 
         save_dest : str, optional
-            Location at which to save resulting matrices to netcdf file(s).
+            Location at which to save resulting matrices Z, Zp' to netcdf file(s).
             Defaults to '../maps' relative to this Python module. Note that 
             the maps saved here will be very large! If this clone of the PyTEMDiags
             repo is sitting in a location with limited storage, it is highly
             reccomended to supply this argument.
-        ncoldim : str, optional
-            name of horizontal dimension. Defaults to 'ncol'
         debug : bool, optional
             Whether or not to print progress statements to stdout.
-        overwrite : bool, optional
-            Whether or not to force re-computation and overwriting, if a filename 
-            corresponding to this execution of the function already exists. 
 
         Public Methods
         --------------
@@ -158,9 +167,13 @@ class sph_zonal_averager:
                                                        self.grid_out_name, self.L)
 
         # ---- read remap matrices, if currently exist on file
-        self.sph_compute_matrices(read_only=True, overwrite=overwrite)
- 
+        self.sph_compute_matrices(read_only=True, overwrite=overwriteZ)
 
+        # --- scale grid weights to unit sphere surface area
+        if(self.weights is not None):
+            self.weights *= 4*np.pi
+                
+                    
     # --------------------------------------------------
         
          
@@ -300,94 +313,109 @@ class sph_zonal_averager:
             Z:  The resulting square (NxN) zonal averaging matrix.
             Zp: The resulting non-square (MxN) zonal averaging remap matrix.
         '''
+        
+        self.logger.print('called sph_compute_matrices() for (M x N) '\
+                          '= ({} x {}), L = {}'.format(self.M, self.N, self.L))
  
         # ---- read the averaging and remap matrices from file, if exists
+        read_Y0 = False
         try:
             if(overwrite):
                 if os.path.isfile(self.Z_file_out): os.remove(self.Z_file_out)
                 if os.path.isfile(self.Zp_file_out): os.remove(self.Zp_file_out)
-            self.Z  = xr.open_dataset(self.Z_file_out)['Z'].values
-            self.Zp = xr.open_dataset(self.Zp_file_out)['Zp'].values
-            self.logger.print('Z read from file {}'.format(self.Z_file_out))
-            self.logger.print('Z\' read from file {}'.format(self.Zp_file_out))
-            return
+            Z_ds  = xr.open_dataset(self.Z_file_out)
+            Zp_ds = xr.open_dataset(self.Zp_file_out)
+            Y0    = Z_ds['Y0'].values
+            Y0inv = Z_ds['Y0inv'].values
+            Y0p   = Zp_ds['Y0inv'].values
+            self.logger.print('Y0, Y0inv read from file {}'.format(self.Z_file_out))
+            self.logger.print('Y0\' read from file {}'.format(self.Zp_file_out))
+            read_Y0 = True
         except FileNotFoundError:
             if(read_only):
                 return 
+
+        # ---- if the matrices Y0, Y0inv, Y0p were not read from file, compute and 
+        #      write them out now
+        if(not read_Y0):
+           
+            # ---- place the grid area weights on the diagonal NxN matrix
+            if(self.weights is not None):
+                if(len(self.weights) != len(self.lat)):
+                    raise RuntimeError('number of weights must equal number of native grid latitudes!')
+                self.logger.print('building diag(w) from supplied weights...')
+                self.diagw = np.diag(self.weights)
+
+            # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the input lats
+            self.logger.print('building Y0...')
+            Y0 = np.zeros((self.N, self.L+1)) # matrix to store spherical harmonics on input lats
+            coalt = np.deg2rad(90 - self.lat) # the coaltitude (0 at NP, 180 at SP) in radians
+            for ll in self.l:
+                Y0[:,ll] = sph_harm(0, ll, 0, coalt).real
+
+            # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the output lats
+            self.logger.print('building Y0\'...')
+            Y0p = np.zeros((self.M, self.L+1))    # matrix to store spherical harmonics on input lats
+            coalt = np.deg2rad(90 - self.lat_out) # the coaltitude (0 at NP, 180 at SP) in radians
+            for ll in self.l:
+                Y0p[:,ll] = sph_harm(0, ll, 0, coalt).real
+
+            # ---- construct the remap matrices
+            #
+            # ZM recovers the zonal mean on a reduced grid with M data points
+            # ZM_nat recovers the zonal mean on the native grid with N data points
+            #
+            # These lines are the bulk of the computation of this function; the matrix inversions and 
+            # subsequent multplications are timed, and the results printed, if debug=True.
+            # After solving, the matrices Y0 and Y0inv are written out to file. The format is NetCDF; 
+            # for completeness, we name the variable, dimensions, and provide a long name.
+           
+            # ---- invert Y0
+            if(self.weights is not None):
+                self.logger.print('building inv(Y0) = Y^T diag(w)...', with_timer=True)
+                Y0inv = np.matmul(Y0.T, self.diagw)
+                self.logger.timer()
+            else:
+                self.logger.print('no grid weights provided; inverting Y0...', with_timer=True)
+                Y0inv = lstsq(Y0, np.identity(self.N))[0]
+                self.logger.timer()
+
+            # ---- do quick sanity check; Y0inv*Y0 should give the identity matrix
+            Y0invY0 = np.matmul(Y0inv, Y0)
+            diagsum = np.sum(np.diagonal(Y0invY0))
+            matsum  = np.sum(Y0invY0) - diagsum
+            self.logger.print('Sanity check: sum(diag(Y0inv*Y0)) = {} '\
+                              '(should be {})'.format(diagsum, self.L+1))
+            self.logger.print('Sanity check: sum(offdiag(Y0inv*Y0)) = {} '\
+                              '(should be zero)'.format(matsum))
         
-        self.logger.print('called sph_compute_matrices() for (M x N) '\
-                          '= ({} x {}), L = {}'.format(self.M, self.N, self.L))
-
-        # ---- place the grid area weights on the diagonal NxN matrix
-        if(len(self.weights) != len(self.lat)):
-            raise RuntimeError('number of weights must equal number of native grid latitudes!')
-        self.logger.print('building diag(w)...')
-        self.diagw = np.diag(self.weights)
-
-        # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the input lats
-        self.logger.print('building Y0...')
-        Y0 = np.zeros((self.N, self.L+1)) # matrix to store spherical harmonics on input lats
-        coalt = np.deg2rad(90 - self.lat) # the coaltitude (0 at NP, 180 at SP) in radians
-        for ll in self.l:
-            Y0[:,ll] = sph_harm(0, ll, 0, coalt).real
-
-        # ---- compute zeroth-order spherical harmonics Y[l,m=0] at the output lats
-        self.logger.print('building Y0\'...')
-        Y0p = np.zeros((self.M, self.L+1))    # matrix to store spherical harmonics on input lats
-        coalt = np.deg2rad(90 - self.lat_out) # the coaltitude (0 at NP, 180 at SP) in radians
-        for ll in self.l:
-            Y0p[:,ll] = sph_harm(0, ll, 0, coalt).real
-
-        # ---- construct the remap matrices
-        #
-        # ZM recovers the zonal mean on a reduced grid with M data points
-        # ZM_nat recovers the zonal mean on the native grid with N data points
-        #
-        # These lines are the bulk of the computation of this function; the matrix inversions and 
-        # subsequent multplications are timed, and the results printed, if debug=True.
-        # After solving, the matrices Z,Zp are written out to file. The format is NetCDF; for 
-        # completeness, we name the variable, dimensions, and provide a long name.
-       
-        # -- build Z
-        #self.logger.print('inverting Y0...', with_timer=True)
-        #Y0inv = lstsq(Y0, np.identity(self.N))[0]
-        #self.logger.timer()
-        self.logger.print('building inv(Y0) = Y^T diag(w)...', with_timer=True)
-        Y0inv = np.matmul(Υ0.Τ, self.diagw)
-        self.logger.timer()
-        psb.set_trace()
- 
+        # ---- build Z matrix
         self.logger.print('taking Z = Y0*inv(Y0)...', with_timer=True)
-        Z     = np.matmul(Y0, Y0inv)
+        Z = np.matmul(Y0, Y0inv)
         self.logger.timer()
         
-        # -- write out Z 
-        Z_da  = xr.DataArray(Z, dims=('lat_row','lat_col'),
-                                coords={'lat_row': self.lat, 
-                                        'lat_col':self.lat})
-        Z_da.name = 'Z'
-        Z_da.attrs['long_name'] = 'Averaging matrix Z for grid {}'.format(self.grid_name)
-        Z_da['lat_row'].attrs['units'] = 'degrees'
-        Z_da['lat_col'].attrs['units'] = 'degrees'
-        if(not no_write):
-            Z_da.to_netcdf(self.Z_file_out, encoding={'Z':NCENC,'lat_row':NCENC,'lat_col':NCENC})
-            self.logger.print('Z wrote to file {}'.format(self.Z_file_out))
-
-        # -- build Z'
+        # -- build Z' matrix
         self.logger.print('taking Z\' = Y0\'*inv(Y0)...', with_timer=True)
         Zp = np.matmul(Y0p, Y0inv)
         self.logger.timer()
-       
-        # -- write out Z'
-        Zp_da  = xr.DataArray(Zp, dims=('lat_row','lat_col'),
-                                  coords={'lat_row': self.lat_out, 
-                                          'lat_col': self.lat})
-        Zp_da.name = 'Zp'
-        Zp_da.attrs['long_name'] = 'Remap matrix Z\' for grid {}'.format(self.grid_name)
-        Zp_da['lat_row'].attrs['units'] = 'degrees'
-        Zp_da['lat_col'].attrs['units'] = 'degrees'
-        if(not no_write):
-            Zp_da.to_netcdf(self.Zp_file_out, encoding={'Zp':NCENC,'lat_row':NCENC,'lat_col':NCENC})
+        
+        if(not no_write): 
+            # -- write out Z
+            Y0_da  = xr.DataArray(Y0, dims=('ncol','l'))
+            Y0_da.name = 'Y0'
+            Y0_da.attrs['long_name'] = 'Matrix Y0 for grid {}'.format(self.grid_name)
+            Y0inv_da  = xr.DataArray(Y0inv, dims=('l','ncol'))
+            Y0inv_da.name = 'Y0inv'
+            Y0inv_da.attrs['long_name'] = 'Matrix Y0inv for grid {}'.format(self.grid_name)
+            Z_ds = xr.merge([Y0_da, Y0inv_da])
+            Z_ds.to_netcdf(self.Z_file_out, encoding={'Y0':NCENC,'Y0inv':NCENC})
+            self.logger.print('Z wrote to file {}'.format(self.Z_file_out))
+        
+            # -- write out Z'
+            Y0p_da  = xr.DataArray(Y0, dims=('ncol','l'))
+            Y0p_da.name = 'Y0p'
+            Y0p_da.attrs['long_name'] = 'Matrix Y0 for grid {}'.format(self.grid_name)
+            Y0p_da.to_netcdf(self.Zp_file_out, encoding={'Y0p':NCENC})       
             self.logger.print('Zp wrote to file {}'.format(self.Zp_file_out))
         
         # -- done; export to class namespace and return
@@ -397,4 +425,5 @@ class sph_zonal_averager:
 
 
 # -------------------------------------------------------------------------
+
 
