@@ -214,8 +214,8 @@ class TEMDiagnostics:
                                      weights=self.lat_weights,  
                                      grid_name=grid_name, grid_out_name=zm_grid_name, 
                                      save_dest=map_save_dest, debug=debug, 
-                                     overwriteZ=overwrite_map)
-        if(self.ZM.Z is None or self.ZM.Zp is None):
+                                     overwrite=overwrite_map)
+        if(self.ZM.Y0 is None or self.ZM.Y0p is None):
             self.ZM.sph_compute_matrices(overwrite=overwrite_map)
 
         # ---- configure computational fucntions for various operations based on inputs
@@ -519,7 +519,7 @@ class TEMDiagnostics:
         Computes the potential temperature from temperature and pressure.
         '''
         self._logger.print('computing potential temperature...')
-        
+
         # θ = T * (p0/p)**k
         theta = self._multiply_pres(self.ta, (self.p0/self.p)**k)
        
@@ -709,7 +709,7 @@ class TEMDiagnostics:
 
     # --------------------------------------------------
 
-    def to_netcdf(self, loc=os.getcwd(), include_attrs=False):
+    def to_netcdf(self, loc=os.getcwd(), prefix=None, include_attrs=False):
         '''
         Saves all TEM quantities computed by this class to a NetCDF file.
 
@@ -740,8 +740,10 @@ class TEMDiagnostics:
             output = dict(attrs, **results)
         else:
             output = results
+
+        ss = ['_', ''][int(prefix is None)]
         
-        filename       = 'TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(
+        filename       = '{}{}TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(prefix, ss,
                          self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
                          self.zm_pole_points, include_attrs)
         self._out_file = '{}/{}'.format(loc, filename)

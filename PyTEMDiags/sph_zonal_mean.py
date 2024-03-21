@@ -34,7 +34,7 @@ NCENC = {'_FillValue':None}
 
 class sph_zonal_averager:
     def __init__(self, lat, lat_out, L, weights=None, grid_name=None, grid_out_name=None, 
-                 ncoldim='ncol', overwriteZ=False, save_dest=None, debug=False):
+                 ncoldim='ncol', overwrite=False, save_dest=None, debug=False):
         '''
         This class provides an interface for taking zonal averages of fields provided
         on unstructured datasets on the globe using a spherical harmonic decomposition 
@@ -84,12 +84,12 @@ class sph_zonal_averager:
             ignored if passed.
         ncoldim : str, optional
             name of horizontal dimension. Defaults to 'ncol'
-        overwriteZ : bool, optional
-            Whether or not to force re-computation and overwriting of the Z and Z' 
+        overwrite : bool, optional
+            Whether or not to force re-computation and overwriting of the Y0, Yinv and Y0p
             matrices on file, if a filename corresponding to this execution of the 
             function already exists. 
         save_dest : str, optional
-            Location at which to save resulting matrices Z, Zp' to netcdf file(s).
+            Location at which to save resulting matrices Y0, Y' to netcdf file(s).
             Defaults to '../maps' relative to this Python module. Note that 
             the maps saved here will be very large! If this clone of the PyTEMDiags
             repo is sitting in a location with limited storage, it is highly
@@ -116,14 +116,16 @@ class sph_zonal_averager:
             Number of input native grid latitudes.
         M : int 
             Number of output gtrid latitudes.
-        Z : (N x N) array
+        Y0 : (N x L+1) array
             Averaging matrix for estiamting zonal means of the native data on the native grid
-        Zp : (M x N) array
+        Y0inv : (N x L+1) array
+            Inverse of Y0
+        Y0p : (M x L+1) array
             Remap matrix for estiamting zonal means of the native data on the output grid
-        Z_file_out : str
-            NetCDF file location for writing/reading matrix Z.
-        Zp_file_out : str
-            NetCDF file location for writing/reading matrix Zp.
+        Y0_file_out : str
+            NetCDF file location for writing/reading matrices Y0, Y0inv.
+        Y0p_file_out : str
+            NetCDF file location for writing/reading matrix Y0p.
         '''
         
         self.logger = logger(debug, 'sph_zonal_mean')
@@ -149,25 +151,26 @@ class sph_zonal_averager:
         self.M = len(lat_out)   # number of output latitudes
         self.l = np.arange(L+1) # spherical harmonic degree 0->L
         self.diagw = None       # diagonal weight matrix
-        self.Z = None           # zonal averageing matrix (native -> native)
-        self.Zp = None          # zonal remap matrix (native -> output)
-        self.Z_file_out = None  # output file location for matrix Z
-        self.Zp_file_out = None # output file location for matrix Zp
+        self.Y0    = None       # spherical harmonic matrix (native -> native)
+        self.Y0inv = None       # inverted spherical harmonic matrix (native -> native)
+        self.Y0p    = None       # spherical harmonic remap matrix (native -> output)
+        self.Y0_file_out = None  # output file location for matrices Y0, Y0inv
+        self.Y0p_file_out = None # output file location for matrix Y0p
          
         # ---- identify matrix output files, apply defaults 
         if(self.save_dest is None):
             self.save_dest = SAVE_DEST
         if(self.grid_name is None):
             self.grid_name = 'ncol{}'.format(self.N)
-        self.Z_file_out = '{}/Z_{}_L{}.nc'.format(self.save_dest, self.grid_name, self.L)
+        self.Y0_file_out = '{}/Y0_{}_L{}.nc'.format(self.save_dest, self.grid_name, self.L)
         if(self.grid_out_name is None):
             dlat_out = np.diff(self.lat_out)[0]
             self.grid_out_name = '{}deg'.format(dlat_out)
-        self.Zp_file_out = '{}/Zp_{}_{}_L{}.nc'.format(self.save_dest, self.grid_name, 
+        self.Y0p_file_out = '{}/Y0p_{}_{}_L{}.nc'.format(self.save_dest, self.grid_name, 
                                                        self.grid_out_name, self.L)
 
         # ---- read remap matrices, if currently exist on file
-        self.sph_compute_matrices(read_only=True, overwrite=overwriteZ)
+        self.sph_compute_matrices(read_only=True, overwrite=overwrite)
 
         # --- scale grid weights to unit sphere surface area
         if(self.weights is not None):
@@ -177,9 +180,9 @@ class sph_zonal_averager:
     # --------------------------------------------------
         
          
-    def _sph_zonal_mean_generic(self, A, ZZ):
+    def _sph_zonal_mean_generic(self, A, Y):
         '''
-        Takes the zonal mean of an input native-grid variable A, given the matrix ZZ.
+        Takes the zonal mean of an input native-grid variable A, given the spherical harmonic matrix Y.
 
         Parameters
         ----------
@@ -190,26 +193,21 @@ class sph_zonal_averager:
             that the horizontal dimension of length N is the leftmost dimension of 
             the array. It is also assumed that this horizontal dimension has no associated
             coordinate values, and no attributes.
-        ZZ : (NN x N) array
-            2D transformation matrix. M must be <= N. If desiring to obtain the zonal
-            mean of A on the native grid, then NN==N (i.e. this argument should be self.Z).
-            If instead desiring to obtain the zonal mean of A on the output grid, 
-            then NN==M<N (i.e. this argument should be self.Zp).
 
         Returns
         -------
         Abar : length-N 1D xarray DataArray, or N-dimensional xarray DataArray 
-            The zonal mean of the input dataset. If ZZ=Z, then the shape of the output
-            data Abar matches the input data A. If ZZ=Zp, then the shape of the output
+            The zonal mean of the input dataset. If Y=Y0, then the shape of the output
+            data Abar matches the input data A. If Y=Y0p, then the shape of the output
             data Abar matches the input data A in all dimensions except for the 
             horizontal (leftmost) dimension, which is reduced in length from N to M.
-            If ZZ=Zp, then the latitudes of the output grid are added to the meta
-            data of the DataArray Abar as a coordinate, and in either case for ZZ, 
+            If Y=Y0p, then the latitudes of the output grid are added to the meta
+            data of the DataArray Abar as a coordinate, and in either case for Y, 
             the variabel long_name attribute is updated.
         '''
 
-        if(self.Z is None or self.Zp is None):
-            raise RuntimeError('Matrices Z and/or Zp are undefined; either verify grid_name,'\
+        if(self.Y0 is None or self.Y0p is None):
+            raise RuntimeError('Matrices Y0, Y0inv, and/or Y0p are undefined; either verify grid_name,'\
                                'grid_name_out, and save_dest, or call sph_compute_matrices()'\
                                'before sph_zonal_mean() or sph_zonal_mean_native()!')
         if(not isinstance(A, xr.core.dataarray.DataArray)):
@@ -240,10 +238,10 @@ class sph_zonal_averager:
         
         # ---- do averaging, reshape
         self.logger.print('Taking zonal average of variable {}...'.format(A.name))
-        Abar = np.matmul(ZZ, AA)
+        Abar = np.matmul(np.matmul(Y, self.Y0inv), AA)
         
         oldshape = Abar.shape
-        NN = ZZ.shape[0]         # outer dimension of ZZ (either N or M)
+        NN = Y.shape[0]         # outer dimension of Y (either N or M)
         Abar = Abar.reshape((NN, *shape[1:]))
         self.logger.print('Reshaped zonal mean of variable {}: {} -> {}'.format(
                                                    A.name, oldshape, Abar.shape))
@@ -262,23 +260,23 @@ class sph_zonal_averager:
             A.coords['lat'] = self.lat_out
             A.attrs = DEFAULT_LAT_ATTRS
             self.logger.print('Reduced ncol of variable {} to the zonal-mean grid: '\
-                              'ncol={} -> ncol{}'.format(A.name, self.N, self.M))
+                              'ncol={} -> ncol={}'.format(A.name, self.N, self.M))
         A.values = Abar
         A.attrs['long_name'] = 'zonal mean of {}'.format(A.name)
         return A 
          
     def sph_zonal_mean_native(self, A):
         '''
-        Calls sph_zonal_mean_generic with ZZ=Z (the native grid). See _sph_zonal_mean_generic
+        Calls sph_zonal_mean_generic with Y=Y0 (the native grid). See _sph_zonal_mean_generic
         docstrings for argument descriptions
         '''
-        return self._sph_zonal_mean_generic(A, self.Z)
+        return self._sph_zonal_mean_generic(A, self.Y0)
     def sph_zonal_mean(self, A):
         '''
-        Calls sph_zonal_mean_generic with ZZ=Zp (the output grid). See _sph_zonal_mean_generic
+        Calls sph_zonal_mean_generic with Y=Y0p (the output grid). See _sph_zonal_mean_generic
         docstrings for argument descriptions
         '''
-        return self._sph_zonal_mean_generic(A, self.Zp)
+        return self._sph_zonal_mean_generic(A, self.Y0p)
     
 
     # --------------------------------------------------
@@ -306,12 +304,6 @@ class sph_zonal_averager:
             If True, do not write remap matrices to file; compute_sph_matrices 
             will instead only return the matrices as 2D arrays to caller. 
             Defaults to False.
-
-        Returns
-        -------
-        [Z, Zp] : list of [NxN, MxM] arrays
-            Z:  The resulting square (NxN) zonal averaging matrix.
-            Zp: The resulting non-square (MxN) zonal averaging remap matrix.
         '''
         
         self.logger.print('called sph_compute_matrices() for (M x N) '\
@@ -321,15 +313,15 @@ class sph_zonal_averager:
         read_Y0 = False
         try:
             if(overwrite):
-                if os.path.isfile(self.Z_file_out): os.remove(self.Z_file_out)
-                if os.path.isfile(self.Zp_file_out): os.remove(self.Zp_file_out)
-            Z_ds  = xr.open_dataset(self.Z_file_out)
-            Zp_ds = xr.open_dataset(self.Zp_file_out)
-            Y0    = Z_ds['Y0'].values
-            Y0inv = Z_ds['Y0inv'].values
-            Y0p   = Zp_ds['Y0inv'].values
-            self.logger.print('Y0, Y0inv read from file {}'.format(self.Z_file_out))
-            self.logger.print('Y0\' read from file {}'.format(self.Zp_file_out))
+                if os.path.isfile(self.Y0_file_out): os.remove(self.Y0_file_out)
+                if os.path.isfile(self.Y0p_file_out): os.remove(self.Y0p_file_out)
+            Y0_ds  = xr.open_dataset(self.Y0_file_out)
+            Y0p_ds = xr.open_dataset(self.Y0p_file_out)
+            Y0    = Y0_ds['Y0'].values
+            Y0inv = Y0_ds['Y0inv'].values
+            Y0p   = Y0p_ds['Y0p'].values
+            self.logger.print('Y0,Y0inv read from file {}'.format(self.Y0_file_out))
+            self.logger.print('Y0\' read from file {}'.format(self.Y0p_file_out))
             read_Y0 = True
         except FileNotFoundError:
             if(read_only):
@@ -362,8 +354,8 @@ class sph_zonal_averager:
 
             # ---- construct the remap matrices
             #
-            # ZM recovers the zonal mean on a reduced grid with M data points
-            # ZM_nat recovers the zonal mean on the native grid with N data points
+            # Y0*Y0inv recovers the zonal mean on a reduced grid with M data points
+            # Y0p*Y0inv recovers the zonal mean on the native grid with N data points
             #
             # These lines are the bulk of the computation of this function; the matrix inversions and 
             # subsequent multplications are timed, and the results printed, if debug=True.
@@ -381,47 +373,36 @@ class sph_zonal_averager:
                 self.logger.timer()
 
             # ---- do quick sanity check; Y0inv*Y0 should give the identity matrix
-            Y0invY0 = np.matmul(Y0inv, Y0)
-            diagsum = np.sum(np.diagonal(Y0invY0))
-            matsum  = np.sum(Y0invY0) - diagsum
+            diagsum = np.sum(np.diagonal(np.matmul(Y0inv, Y0)))
+            matsum  = np.sum(np.matmul(Y0inv, Y0)) - diagsum
             self.logger.print('Sanity check: sum(diag(Y0inv*Y0)) = {} '\
                               '(should be {})'.format(diagsum, self.L+1))
             self.logger.print('Sanity check: sum(offdiag(Y0inv*Y0)) = {} '\
                               '(should be zero)'.format(matsum))
         
-        # ---- build Z matrix
-        self.logger.print('taking Z = Y0*inv(Y0)...', with_timer=True)
-        Z = np.matmul(Y0, Y0inv)
-        self.logger.timer()
-        
-        # -- build Z' matrix
-        self.logger.print('taking Z\' = Y0\'*inv(Y0)...', with_timer=True)
-        Zp = np.matmul(Y0p, Y0inv)
-        self.logger.timer()
-        
         if(not no_write): 
-            # -- write out Z
-            Y0_da  = xr.DataArray(Y0, dims=('ncol','l'))
+            # -- write out Y
+            Y0_da      = xr.DataArray(Y0, dims=('ncol','l'))
             Y0_da.name = 'Y0'
             Y0_da.attrs['long_name'] = 'Matrix Y0 for grid {}'.format(self.grid_name)
             Y0inv_da  = xr.DataArray(Y0inv, dims=('l','ncol'))
             Y0inv_da.name = 'Y0inv'
             Y0inv_da.attrs['long_name'] = 'Matrix Y0inv for grid {}'.format(self.grid_name)
-            Z_ds = xr.merge([Y0_da, Y0inv_da])
-            Z_ds.to_netcdf(self.Z_file_out, encoding={'Y0':NCENC,'Y0inv':NCENC})
-            self.logger.print('Z wrote to file {}'.format(self.Z_file_out))
+            Y0_ds = xr.merge([Y0_da, Y0inv_da])
+            Y0_ds.to_netcdf(self.Y0_file_out, encoding={'Y0':NCENC,'Y0inv':NCENC})
+            self.logger.print('Y0,Y0inv wrote to file {}'.format(self.Y0_file_out))
         
-            # -- write out Z'
-            Y0p_da  = xr.DataArray(Y0, dims=('ncol','l'))
+            # -- write out Y'
+            Y0p_da      = xr.DataArray(Y0p, dims=('ncol','l'))
             Y0p_da.name = 'Y0p'
-            Y0p_da.attrs['long_name'] = 'Matrix Y0 for grid {}'.format(self.grid_name)
-            Y0p_da.to_netcdf(self.Zp_file_out, encoding={'Y0p':NCENC})       
-            self.logger.print('Zp wrote to file {}'.format(self.Zp_file_out))
+            Y0p_da.attrs['long_name'] = 'Matrix Y0p for grid {}'.format(self.grid_out_name)
+            Y0p_da.to_netcdf(self.Y0p_file_out, encoding={'Y0p':NCENC})       
+            self.logger.print('Y0p wrote to file {}'.format(self.Y0p_file_out))
         
         # -- done; export to class namespace and return
-        self.Z = Z
-        self.Zp = Zp
-        return [Z, Zp]
+        self.Y0    = Y0
+        self.Y0inv = Y0inv
+        self.Y0p   = Y0p
 
 
 # -------------------------------------------------------------------------
