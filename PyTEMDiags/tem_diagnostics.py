@@ -586,12 +586,12 @@ class TEMDiagnostics:
         self._dthetab_dp      = self._p_gradient(self._thetab, self.p, self._logger)
 
         self._ubcoslat        = self._multiply_lat(self._ub, self.coslat)
-        self._dubcoslat_dlat  = lat_gradient(self._ubcoslat, self.lat)
+        self._dubcoslat_dlat  = lat_gradient(self._ubcoslat, np.deg2rad(self.lat))
         
         # ψ = bar(v'* θ') / (dθ'/dp)
         self._psi                  = self._vptpb / self._dthetab_dp 
         self._psicoslat            = self._multiply_lat(self._psi, self.coslat)
-        self._dpsicoslat_dlat      = lat_gradient(self._psicoslat, self.lat)
+        self._dpsicoslat_dlat      = lat_gradient(self._psicoslat, np.deg2rad(self.lat))
         self._dpsi_dp              = self._p_gradient(self._psi, self.p, self._logger) 
        
         self._int_vbdp  = self._p_integral(self._vb, self.p, self._logger)
@@ -630,7 +630,7 @@ class TEMDiagnostics:
         Fp   = self._epfz() * -self.p0/H
        
         Fphicoslat       = self._multiply_lat(Fphi, self.coslat)
-        dFphicoslat_dlat = lat_gradient(Fphicoslat, self.lat)
+        dFphicoslat_dlat = lat_gradient(Fphicoslat, np.deg2rad(self.lat))
         dFp_dp           = self._p_gradient(Fp, self.p)
         
         return self._multiply_lat(dFphicoslat_dlat, 1/(a*self.coslat)) + dFp_dp
@@ -741,9 +741,10 @@ class TEMDiagnostics:
         else:
             output = results
 
-        ss = ['_', ''][int(prefix is None)]
+        if prefix is not None: prefix = '{}_'.format(prefix)
+        else: prefix = ''
         
-        filename       = '{}{}TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(prefix, ss,
+        filename       = '{}TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(prefix,
                          self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
                          self.zm_pole_points, include_attrs)
         self._out_file = '{}/{}'.format(loc, filename)

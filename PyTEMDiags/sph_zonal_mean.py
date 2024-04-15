@@ -380,24 +380,24 @@ class sph_zonal_averager:
             self.logger.print('Sanity check: sum(offdiag(Y0inv*Y0)) = {} '\
                               '(should be zero)'.format(matsum))
         
-        if(not no_write): 
-            # -- write out Y
-            Y0_da      = xr.DataArray(Y0, dims=('ncol','l'))
-            Y0_da.name = 'Y0'
-            Y0_da.attrs['long_name'] = 'Matrix Y0 for grid {}'.format(self.grid_name)
-            Y0inv_da  = xr.DataArray(Y0inv, dims=('l','ncol'))
-            Y0inv_da.name = 'Y0inv'
-            Y0inv_da.attrs['long_name'] = 'Matrix Y0inv for grid {}'.format(self.grid_name)
-            Y0_ds = xr.merge([Y0_da, Y0inv_da])
-            Y0_ds.to_netcdf(self.Y0_file_out, encoding={'Y0':NCENC,'Y0inv':NCENC})
-            self.logger.print('Y0,Y0inv wrote to file {}'.format(self.Y0_file_out))
-        
-            # -- write out Y'
-            Y0p_da      = xr.DataArray(Y0p, dims=('ncol','l'))
-            Y0p_da.name = 'Y0p'
-            Y0p_da.attrs['long_name'] = 'Matrix Y0p for grid {}'.format(self.grid_out_name)
-            Y0p_da.to_netcdf(self.Y0p_file_out, encoding={'Y0p':NCENC})       
-            self.logger.print('Y0p wrote to file {}'.format(self.Y0p_file_out))
+            if(not no_write): 
+                # -- write out Y
+                Y0_da      = xr.DataArray(Y0, dims=('ncol','l'))
+                Y0_da.name = 'Y0'
+                Y0_da.attrs['long_name'] = 'Matrix Y0 for grid {}'.format(self.grid_name)
+                Y0inv_da  = xr.DataArray(Y0inv, dims=('l','ncol'))
+                Y0inv_da.name = 'Y0inv'
+                Y0inv_da.attrs['long_name'] = 'Matrix Y0inv for grid {}'.format(self.grid_name)
+                Y0_ds = xr.merge([Y0_da, Y0inv_da])
+                Y0_ds.to_netcdf(self.Y0_file_out, encoding={'Y0':NCENC,'Y0inv':NCENC})
+                self.logger.print('Y0,Y0inv wrote to file {}'.format(self.Y0_file_out))
+            
+                # -- write out Y'
+                Y0p_da      = xr.DataArray(Y0p, dims=('ncol','l'))
+                Y0p_da.name = 'Y0p'
+                Y0p_da.attrs['long_name'] = 'Matrix Y0p for grid {}'.format(self.grid_out_name)
+                Y0p_da.to_netcdf(self.Y0p_file_out, encoding={'Y0p':NCENC})       
+                self.logger.print('Y0p wrote to file {}'.format(self.Y0p_file_out))
         
         # -- done; export to class namespace and return
         self.Y0    = Y0
