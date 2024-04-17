@@ -778,7 +778,10 @@ class TEMDiagnostics:
         Returns the EP flux divergence.
         '''
         # ∇ * F = 1/(a * cos(φ)) * d(F_φ*cos(φ))/dφ + d(F_p)/dp
-        Fphi = self._epfy()
+        # the functions epfy and epfz compute the log-pressure versions of the 
+        # vector components, while the present calculation requires the pressure
+        # versions. Cancel the conversion factors first
+        Fphi = self.multiply_pres(self._epfy(), self.p0/self.p)
         Fp   = self._epfz() * -self.p0/H
        
         Fphicoslat       = self._multiply_lat(Fphi, self.coslat)
