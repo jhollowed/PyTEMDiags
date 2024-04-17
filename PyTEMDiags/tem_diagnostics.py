@@ -24,21 +24,24 @@ from .sph_zonal_mean import *
 # ---- global constants
 DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
 
+
 # -------------------------------------------------------------------------
 
 
 class TEMDiagnostics:
-    def __init__(self, ua, va, ta, wap, p, lat_native, lat_weights, p0=P0, zm_dlat=1, L=150, 
-                 dim_names=DEFAULT_DIMS, log_pressure=True, grid_name=None, 
-                 zm_grid_name=None, map_save_dest=None, overwrite_map=False, 
-                 zm_pole_points=False, debug=False):
+    def __init__(self, ua, va, ta, wap, p, q, lat_native, p0=P0, zm_dlat=1, L=150, 
+                 lat_weights=None, dim_names=DEFAULT_DIMS, log_pressure=True, 
+                 grid_name=None, zm_grid_name=None, map_save_dest=None, 
+                 overwrite_map=False, zm_pole_points=False, debug=False):
         '''
         This class provides interfaces for computing TEM diagnostic quantities, assuming 
         either a log-pressure (the default) or pure-pressure vertical coordinate. Upon 
         initialization, the input data is checked and reshaped as necessary, zonal-averaging 
         matrices are built, and zonal mean and eddy components are computed. The available 
         data inputs and outputs (and their naming conventions) are derived from the DynVarMIP
-        experimental protocol (Gerber+Manzini 2016).
+        experimental protocol (Gerber+Manzini 2016). Funcitonality consistent with these 
+        conventions is also included for computin the tracer TEM terms as described in 
+        Abalos+ 2017.
 
         Parameters
         ----------
@@ -63,6 +66,11 @@ class TEMDiagnostics:
             If p is passed as a variable, then all derivatives are computed individually 
             per-column, and an extra remapping step is performed to return zonally avergaed 
             quantities, thus the computations are slower.
+        q : xarray DataArray, or list of xarray DataArray
+            dimensionless tracer mass mixing ratios (e.g. kg/kg). This arugment can support any
+            arbitrary number of tracer species. If passed as a list, then the list elements 
+            should each be xarray DataArrays, each corresponding to a unique tracer. Dimenionality
+            and units of the arrays should match the description of argument ua.
         lat_native : xarray DataArray
             Latitudes in degrees.
         lat_weights : xarray DataArray
@@ -105,18 +113,18 @@ class TEMDiagnostics:
         
         Public Methods
         --------------
-        epfy()
-            Returns the northward component of the EP flux in m3/s2.
-        epfz()
-            Returns the upward component of the EP flux in m3s2.
-        epdiv()
-            Returns the EP flux divergence.
         vtem()
             Returns the TEM northward wind in m/s.
         wtem()
             Returns the TEM upward wind in m/s.
         psitem()
             Returns the TEM mass stream function in kg/s.
+        epfy()
+            Returns the northward component of the EP flux in m3/s2.
+        epfz()
+            Returns the upward component of the EP flux in m3/s2.
+        epdiv()
+            Returns the EP flux divergence.
         utendepfd()
             Returns the tendency of eastward wind due to EP flux divergence in m/s2.
         utendvtem()
@@ -124,6 +132,19 @@ class TEMDiagnostics:
             and coriolis in m/s2.
         utendwtem()
             Returns the tendency of eastward wind due to TEM upward wind advection in m/s2.
+        etfy()
+            Returns the northward component of the eddy tracer flux in m2/s.
+        etfz()
+            Returns the upward component of the eddy tracer flux in m2/s.
+        etdiv()
+            Returns the eddy tracer flux divergence.
+        qtendetfd()
+            Returns the tendency of tracer mixing ratios due to eddy tracer flux divergence in 1/s.
+        qtendvtem()
+            Returns the tendency of tracer mixing ratios due to TEM northward wind advection 
+            and coriolis in 1/s.
+        qtendwtem()
+            Returns the tendency of tracer mixing ratios due to TEM upward wind advection in 1/s.
         
         Public Attributes
         -----------------
@@ -143,6 +164,8 @@ class TEMDiagnostics:
             input wap.
         thetap : N-D array
             "theta-prime", zonally asymmetric anomaly in K, matching dims of input ta.
+        qp : N-D array
+            "q-prime", zonally asymmetric anomaly in kg/kg, matching dims of input q.
         ub : N-D array
             "u-bar", zonal mean of ua in m/s, matching length of lat_zm in the horizontral, 
             otherwise matching dims of input ua.
@@ -155,6 +178,9 @@ class TEMDiagnostics:
         thetab : N-D array
             "theta-bar", zonal mean of theta in K, matching length of lat_zm in the 
             horizontral, otherwise matching dims of input ta.
+        qb : N-D array
+            "q-bar", zonal mean of q in kg/kg, matching length of lat_zm in the 
+            horizontral, otherwise matching dims of input q.
         upvp : N-D array
             Product of up and vp in m2/s2, aka northward flux of eastward momentum, matching 
             dims of input ua.
@@ -173,6 +199,18 @@ class TEMDiagnostics:
         vptpb : N-D array
             Zonal mean of vptp in (m K)/s, matching length of lat_zm in the horizontal, 
             otherwise matching dims of input va.
+        qpvp : N-D array
+            Product of qp and vp in m/s, aka northward eddy tracer flux, matching 
+            dims of input q.
+        qpwapp : N-D array
+            Product of qp and wapp in Pa/s, aka upward eddy tracer flux, 
+            matching dims of input q.
+        qpvpb : N-D array
+            Zonal mean of qpvp in m/s, matching length of lat_zm in the horizontal, 
+            otherwise matching dims of input q.
+        qpwappb : N-D array
+            Zonal mean of qpwapp in Pa/s, matching length of lat_zm in the horizontal, 
+            otherwise matching dims of input q.
         out_file : str
             Output filename, used for naming data files written by the to_netcdf() method. 
             Simple string that contains metadata about the current TEM option configuration.
@@ -182,12 +220,14 @@ class TEMDiagnostics:
         
         # ---- get input args
         # variables
-        self.p    = p    # pressure [Pa]
-        self.ua   = ua   # eastward wind [m/s]
-        self.va   = va   # northward wind [m/s]
-        self.ta   = ta   # temperature [K]
-        self.wap  = wap  # vertical pressure velocity [Pa/s]
-        self.p0   = p0   # reference pressure [Pa]
+        self.p     = p    # pressure [Pa]
+        self.ua    = ua   # eastward wind [m/s]
+        self.va    = va   # northward wind [m/s]
+        self.ta    = ta   # temperature [K]
+        self.wap   = wap  # vertical pressure velocity [Pa/s]
+        self.p0    = p0   # reference pressure [Pa]
+        self.q     = q    # tracer mixing ratios [kg/kg]
+        self.ntrac = None # number of input tracers
         self.lat_native  = lat_native  # latitudes [deg]
         self.lat_weights = lat_weights  # latitude weights (grid cell areas)
         # options
@@ -209,10 +249,12 @@ class TEMDiagnostics:
         
         # ---- construct zonal averaging obeject
         self._logger.print('Getting zonal averaging matrices...')
-        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.lat_weights, self.L,  
-                                     grid_name, zm_grid_name, map_save_dest, 
-                                     debug=debug, overwrite=overwrite_map)
-        if(self.ZM.Z is None or self.ZM.Zp is None):
+        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L, 
+                                     weights=self.lat_weights,  
+                                     grid_name=grid_name, grid_out_name=zm_grid_name, 
+                                     save_dest=map_save_dest, debug=debug, 
+                                     overwrite=overwrite_map)
+        if(self.ZM.Y0 is None or self.ZM.Y0p is None):
             self.ZM.sph_compute_matrices(overwrite=overwrite_map)
 
         # ---- configure computational fucntions for various operations based on inputs
@@ -231,9 +273,7 @@ class TEMDiagnostics:
         # ---- output filename used by self.to_netcdf()
         self._out_file = None
      
-    
     # --------------------------------------------------
-
 
     def _config_dims(self):
         '''
@@ -249,9 +289,29 @@ class TEMDiagnostics:
         try: self.timename   = self.dim_names['time']
         except KeyError: self.timename = DEFAULT_DIMS['time']
         self.data_dims = (self.ncolname, self.levname, self.timename)
-        
-        allvars     = {'ua':self.ua, 'va':self.va, 'ta':self.ta, 
-                       'wap':self.wap, 'lat':self.lat_native}
+
+        # ---- ensure tracers are a list of DataArrays
+        bad_q = False
+        if(type(self.q) is not type(list())):
+            # if q isn't a list, then only a single tracer was passed, and thus
+            # it should be a DataArray. Place this variable into a list of length-1
+            if(type(self.q) is not xr.core.dataarray.DataArray): bad_q = True
+            else: self.q = [self.q]
+        else:
+            # if q is a list, multiple tracers were passed. All should be DataArrays
+            for qi in self.q:
+                if(type(qi) is not xr.core.dataarray.DataArray): bad_q = True
+        if(bad_q): 
+            raise RuntimeError('tracers q must be passed as an xarray DataArray, or'\
+                               'a list of xarray DataArrays')
+        self.ntac = len(self.q) # record number of input tracers
+        self._logger.print('Number of input tracers: {}'.format(self.ntrac))
+
+        # ---- gather variables for dimensions config 
+        allvars    = {'ua':self.ua, 'va':self.va, 'ta':self.ta, 
+                      'wap':self.wap, 'lat':self.lat_native}
+        alltracers = dict(('q{}'.format(i), self.q[i]), for i in range(len(self.q)))
+        allvars    = {**allvars, **alltracers}
 
         # ---- check if pressure was input as a coordinate (1D) or a variable (>1D)
         if len(self.p.dims) == 1 and self.p.dims[0] == self.levname:
@@ -314,6 +374,12 @@ class TEMDiagnostics:
             old_dims = self.p.dims
             self.p = self.p.transpose(*self.data_dims)
             self._logger.print('Variable p transposed: {} -> {}'.format(old_dims, self.p.dims))
+        for(i in range(len(self.q))):
+            old_dims = self.q[i].dims
+            self.q[i] = self.q[i].transpose(*self.data_dims)
+            self._logger.print('Variable q[{}] transposed: {} -> {}'.format(
+                                                i, old_dims, self.q[i].dims))
+
         
         # ---- get coordinates, data lengths
         self.lev  = self.ua[self.levname]   # model levels [hPa]
@@ -367,21 +433,20 @@ class TEMDiagnostics:
         # ensure that pressure increases toward right-end of arrays. If not, flip
         # this axis for all data
         if(self.lev[0] > self.lev[-1]):
-            self.ua = self.ua.reindex({self.levname, self.lev[::-1]})
-            self.va = self.va.reindex({self.levname, self.lev[::-1]})
-            self.ta = self.ta.reindex({self.levname, self.lev[::-1]})
+            self.ua  = self.ua.reindex({self.levname, self.lev[::-1]})
+            self.vai = self.va.reindex({self.levname, self.lev[::-1]})
+            self.ta  = self.ta.reindex({self.levname, self.lev[::-1]})
             self.wap = self.wap.reindex({self.levname, self.lev[::-1]})
-            self.p = self.p.reindex({self.levname, self.lev[::-1]})
+            self.p   = self.p.reindex({self.levname, self.lev[::-1]})
+            for i in range(len(slf.q)):
+                self.q[i] = self.q[i].reindex({self.levname, self.lev[::-1]}) 
             self.lev = self.ua[self.levname]
             self._logger.print('Reversed direction of vertical dimension for all data '\
                                '(such that the model top is the leftmost entry in the '\
                                'pressure data array)')
             
-    
-
     # --------------------------------------------------
     
-
     def _config_functions(self):
         '''
         Depending on ptype (whether pressure p was input as a coordinate or a variable), 
@@ -436,9 +501,7 @@ class TEMDiagnostics:
             self._logger.print('configuration set for pressure p as a variable')
         self._multiply_lat = util.multiply_lat #(k)
     
-
     # --------------------------------------------------
-    
 
     '''
     Below are a set of getter functions for all zonally-averaged quantities.
@@ -461,11 +524,37 @@ class TEMDiagnostics:
     @property
     def wapb(self): return self._zm_return_func(self._wapb)
     @property
+    def qb(self): return self._zm_return_func(self._qb)
+    @property
+    def up(self): return self._up
+    @property
+    def vp(self): return self._vp
+    @property
+    def thetap(self): return self._thetap
+    @property
+    def wapp(self): return self._wapp
+    @property
+    def qp(self): return self._qp
+    @property
+    def upvp(self): return self._upvp
+    @property
+    def upwapp(self): return self._upwapp
+    @property
+    def vptp(self): return self._vptp
+    @property
+    def qpvp(self): return self._qpvp
+    @property
+    def qpwapp(self): return self._qpwapp    
+    @property
     def upvpb(self): return self._zm_return_func(self._upvpb)
     @property
     def upwappb(self): return self._zm_return_func(self._upwappb)
     @property
     def vptpb(self): return self._zm_return_func(self._vptpb)
+    @property
+    def qpvpb(self): return self._zm_return_func(self._qpvpb)
+    @property
+    def qpwappb(self): return self._zm_return_func(self._qpwappb)
     @property
     def dub_dp(self): return self._zm_return_func(self._dub_dp)
     @property
@@ -479,52 +568,49 @@ class TEMDiagnostics:
     @property
     def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
     @property
-    def psi(self): return self._zm_return_func(self._psi)
+    def dqb_dp(self): return self._zm_return_func(self.dqb_dp)
     @property
-    def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
+    def qbcoslat(self): return self._zm_return_func(self._qbcoslat)
+    @property
+    def dqbcoslat_dlat(self): return self._zm_return_func(self._dqbcoslat_dlat)
     @property
     def int_vbdp(self): return self._zm_return_func(self._int_vbdp) 
     @property
-    def up(self): return self._up
+    def psi(self): return self._zm_return_func(self._psi)
     @property
-    def vp(self): return self._vp
-    @property
-    def thetap(self): return self._thetap
-    @property
-    def wapp(self): return self._wapp
-    @property
-    def upvp(self): return self._upvp
-    @property
-    def upwapp(self): return self._upwapp
-    @property
-    def vptp(self): return self._vptp
+    def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
     @property
     def out_file(self): 
         if(self._out_file is None):
             warnings.warn('\'out_file\' is not set until to_netcdf() is called')
         return self._out_file
     
-    def epfy(self): return self._zm_return_func(self._epfy())
-    def epfz(self): return self._zm_return_func(self._epfz())
-    def epdiv(self): return self._zm_return_func(self._epdiv())
     def vtem(self): return self._zm_return_func(self._vtem())
     def omegatem(self): return self._zm_return_func(self._omegatem())
     def wtem(self): return self._zm_return_func(self._wtem())
     def omegatem(self): return self._zm_return_func(self._omegatem())
     def psitem(self): return self._zm_return_func(self._psitem())
+    def epfy(self): return self._zm_return_func(self._epfy())
+    def epfz(self): return self._zm_return_func(self._epfz())
+    def epdiv(self): return self._zm_return_func(self._epdiv())
     def utendepfd(self): return self._zm_return_func(self._utendepfd())
     def utendvtem(self): return self._zm_return_func(self._utendvtem())
     def utendwtem(self): return self._zm_return_func(self._utendwtem())
+    def etfy(self): return self._zm_return_func(self._epfy())
+    def etfz(self): return self._zm_return_func(self._epfz())
+    def etdiv(self): return self._zm_return_func(self._epdiv())
+    def qtendetfd(self): return self._zm_return_func(self._utendepfd())
+    def qtendvtem(self): return self._zm_return_func(self._utendvtem())
+    def qtendwtem(self): return self._zm_return_func(self._utendwtem())
 
     # --------------------------------------------------
     
-
     def _compute_potential_temperature(self):
         '''
         Computes the potential temperature from temperature and pressure.
         '''
         self._logger.print('computing potential temperature...')
-        
+
         # θ = T * (p0/p)**k
         theta = self._multiply_pres(self.ta, (self.p0/self.p)**k)
        
@@ -536,9 +622,7 @@ class TEMDiagnostics:
         try: del self.theta.attrs['standard_name']
         except KeyError: pass
 
-
     # --------------------------------------------------
-    
 
     def _decompose_zm_eddy(self):
         '''
@@ -561,10 +645,15 @@ class TEMDiagnostics:
         self._wapb.name   = 'wapb'
         self._wapp        = self.wap - self.ZM.sph_zonal_mean_native(self.wap)
         self._wapp.name   = 'wapp'
+        self._logger.print('computing zonal means for tracers...')
+        self._qb, self.qp = [None]*self.ntrac, [None]*welf.ntrac
+        for i in range(len(self.ntrac)): 
+            self._qb[i]       = self._zonal_mean(self.q[i])
+            self._qb[i].name  = 'qb'
+            self._qp[i]       = self.q[i] - self.ZM.sph_zonal_mean_native(self.q[i])
+            self._qp[i].name  = 'qp'
     
-
     # --------------------------------------------------
-    
 
     def _compute_fluxes(self):
         '''
@@ -583,11 +672,21 @@ class TEMDiagnostics:
         self._vptp.name    = 'vptp'
         self._vptpb        = self._zonal_mean(self._vptp)
         self._vptpb.name   = 'vptpb'
+        self._logger.print('computing tracer fluxes and tracer flux zonal means...')
+        self._qpvp, self.qpvpb     = [None]*self.ntrac, [None]*welf.ntrac
+        self._qpwapp, self.qpwappb = [None]*self.ntrac, [None]*welf.ntrac
+        for i in range(len(self.ntrac)): 
+            self._qpvp[i]       = self._qp[i] * self._vp
+            self._qpvp[i].name  = 'qpvp'
+            self._qpvpb[i]      = self._zonal_mean(self._qpvp[i])
+            self._qpvpb[i].name = 'qpvpb'
+            self._qpwap[i]       = self._qp[i] * self._wap
+            self._qpwap[i].name  = 'qpwap'
+            self._qpwapb[i]      = self._zonal_mean(self._qpwap[i])
+            self._qpwapb[i].name = 'qpwapb'
     
-
     # --------------------------------------------------
     
-
     def _compute_derivatives(self):
         '''
         Computes vertical and meridional derivatives, and their zonal averages.
@@ -597,57 +696,21 @@ class TEMDiagnostics:
         self._dthetab_dp      = self._p_gradient(self._thetab, self.p, self._logger)
 
         self._ubcoslat        = self._multiply_lat(self._ub, self.coslat)
-        self._dubcoslat_dlat  = lat_gradient(self._ubcoslat, self.lat)
+        self._dubcoslat_dlat  = lat_gradient(self._ubcoslat, np.deg2rad(self.lat))
         
         # ψ = bar(v'* θ') / (dθ'/dp)
         self._psi                  = self._vptpb / self._dthetab_dp 
         self._psicoslat            = self._multiply_lat(self._psi, self.coslat)
-        self._dpsicoslat_dlat      = lat_gradient(self._psicoslat, self.lat)
+        self._dpsicoslat_dlat      = lat_gradient(self._psicoslat, np.deg2rad(self.lat))
         self._dpsi_dp              = self._p_gradient(self._psi, self.p, self._logger) 
        
         self._int_vbdp  = self._p_integral(self._vb, self.p, self._logger)
-
-
-    # --------------------------------------------------
-
-
-    def _epfy(self):
-        '''
-        Returns the northward component of the EP flux in m3/s2.
-        '''
-        # F_Φ = p/p0 * ( a*cos(φ) * (d(bar(u))/dp * ψ - bar(u'*v') ))
-        x = self._multiply_lat(self._dub_dp * self._psi - self._upvpb, a*self.coslat)
-        return self._multiply_pres(x, self.p/self.p0)
-    
-    # --------------------------------------------------
-
-    def _epfz(self):
-        '''
-        Returns the upward component of the EP flux in m3/s2.
-        ''' 
-        if(self._ptype == 'var'): f = self.f
-        else: f = self.f[:, np.newaxis, np.newaxis]
-
-        # F_z = -H/p0 * a*cos(φ) * (( f - 1/(a*cos(φ)) * d(bar(u)*cos(φ))/dφ )*ψ - bar(u'*ω'))
-        x = f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat))
-        return -H/self.p0 * self._multiply_lat((x*self._psi - self._upwappb), a*self.coslat)
-    
-    # --------------------------------------------------
-
-    def _epdiv(self):
-        '''
-        Returns the EP flux divergence.
-        '''
-        # ∇ * F = 1/(a * cos(φ)) * d(F_φ*cos(φ))/dφ + d(F_p)/dp
-        Fphi = self._epfy()
-        Fp   = self._epfz() * -self.p0/H
-       
-        Fphicoslat       = self._multiply_lat(Fphi, self.coslat)
-        dFphicoslat_dlat = lat_gradient(Fphicoslat, self.lat)
-        dFp_dp           = self._p_gradient(Fp, self.p)
         
-        return self._multiply_lat(dFphicoslat_dlat, 1/(a*self.coslat)) + dFp_dp
-  
+        # tracers
+        self._dqb_dp          = self._p_gradient(self._qb, self.p, self._logger)
+        self._qbcoslat        = self._multiply_lat(self._qb, self.coslat)
+        self._dqbcoslat_dlat  = lat_gradient(self._qbcoslat, np.deg2rad(self.lat))
+
     # --------------------------------------------------
 
     def _vtem(self):
@@ -686,6 +749,45 @@ class TEMDiagnostics:
         return 2*pi*a/g0 * self._multiply_lat(self._int_vbdp - self._psi, self.coslat)
     
     # --------------------------------------------------
+    
+    def _epfy(self):
+        '''
+        Returns the northward component of the EP flux in m3/s2, in log-pressure coordinate
+        '''
+        # ^F_Φ = p/p0 * ( a*cos(φ) * (d(bar(u))/dp * ψ - bar(u'*v') ))
+        x = self._multiply_lat(self._dub_dp * self._psi - self._upvpb, a*self.coslat)
+        return self._multiply_pres(x, self.p/self.p0)
+    
+    # --------------------------------------------------
+
+    def _epfz(self):
+        '''
+        Returns the upward component of the EP flux in m3/s2, in log-pressure coordinate
+        ''' 
+        if(self._ptype == 'var'): f = self.f
+        else: f = self.f[:, np.newaxis, np.newaxis]
+
+        # ^F_z = -H/p0 * a*cos(φ) * (( f - 1/(a*cos(φ)) * d(bar(u)*cos(φ))/dφ )*ψ - bar(u'*ω'))
+        x = f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat))
+        return -H/self.p0 * self._multiply_lat((x*self._psi - self._upwappb), a*self.coslat)
+    
+    # --------------------------------------------------
+
+    def _epdiv(self):
+        '''
+        Returns the EP flux divergence.
+        '''
+        # ∇ * F = 1/(a * cos(φ)) * d(F_φ*cos(φ))/dφ + d(F_p)/dp
+        Fphi = self._epfy()
+        Fp   = self._epfz() * -self.p0/H
+       
+        Fphicoslat       = self._multiply_lat(Fphi, self.coslat)
+        dFphicoslat_dlat = lat_gradient(Fphicoslat, np.deg2rad(self.lat))
+        dFp_dp           = self._p_gradient(Fp, self.p)
+        
+        return self._multiply_lat(dFphicoslat_dlat, 1/(a*self.coslat)) + dFp_dp
+  
+    # --------------------------------------------------
  
     def _utendepfd(self):
         '''
@@ -718,13 +820,92 @@ class TEMDiagnostics:
         ''' 
         # d(bar(u))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(u)/dp
         wstar = self._omegatem()
-        return -wstar * self._dub_dp
+        return -wstar * self._dub_dp 
+
+    # --------------------------------------------------
     
+    def _etfy(self):
+        '''
+        Returns the northward component of the eddy tracer flux in m2/s, in log-pressure 
+        coordinate
+        '''
+        # ^M_Φ = p/p0 * ( a*cos(φ) * (d(bar(q))/dp * ψ - bar(q'*v') ))
+        x = self._multiply_lat(self._dqb_dp * self._psi - self._qpvpb, a*self.coslat)
+        return self._multiply_pres(x, self.p/self.p0)
+    
+    # --------------------------------------------------
+
+    def _etfz(self):
+        '''
+        Returns the upward component of the eddy tracer flux in m2/s, in log-pressure 
+        coordinate
+        ''' 
+        if(self._ptype == 'var'): f = self.f
+        else: f = self.f[:, np.newaxis, np.newaxis]
+
+        # ^M_z = -H/p0 * a*cos(φ) * ( -1/(a*cos(φ)) * d(bar(q)*cos(φ))/dφ )*ψ - bar(q'*ω'))
+        x = -self._multiply_lat(self._dqbcoslat_dlat, 1/(a*self.coslat))
+        return -H/self.p0 * self._multiply_lat((x*self._psi - self._qpwappb), a*self.coslat)
+    
+    # --------------------------------------------------
+
+    def _etdiv(self):
+        '''
+        Returns the EP flux divergence.
+        '''
+        # ∇ * M = 1/(a * cos(φ)) * d(M_φ*cos(φ))/dφ + d(F_p)/dp
+        # the functions etfy and etfz compute the log-pressure versions of the 
+        # vector components, while the present calculation requires the pressure
+        # versions. Cancel the conversion factors first
+        Mphi = self.multiply_pres(self._etfy(), self.p0/self.p)
+        Mp   = self._eptz() * -self.p0/H
+       
+        Mphicoslat       = self._multiply_lat(Mphi, self.coslat)
+        dMphicoslat_dlat = lat_gradient(Mphicoslat, np.deg2rad(self.lat))
+        dMp_dp           = self._p_gradient(Mp, self.p)
+        
+        return self._multiply_lat(dMphicoslat_dlat, 1/(a*self.coslat)) + dMp_dp
+  
+    # --------------------------------------------------
+ 
+    def _qtendetfd(self):
+        '''
+        Returns the tendency of tracer mixing ratios due to eddy tracer flux 
+        divergence in m/s2.
+        '''
+        # d(bar(q))/dt|_(∇ * M) = (∇ * M) / (a*cos(φ))
+        return self._multiply_lat(self._etdiv(), 1/(a * self.coslat))
+
+    
+    # --------------------------------------------------
+ 
+    def _qtendvtem(self):
+        '''
+        Returns the tendency of tracer mixing ratios due to TEM northward wind 
+        advection in m/s2.
+        '''
+        if(self._ptype == 'var'): f = self.f
+        else: f = self.f[:, np.newaxis, np.newaxis]
+        
+        # d(bar(q))/dt|_adv(bar(v)*) = -bar(v)* * (1/(a*cos(φ)) * d(bar(q)cos(φ))/dφ)
+        vstar = self._vtem()
+        diff  = self._multiply_lat(self._dqbcoslat_dlat, 1/(a*self.coslat)))
+        return -vstar * diff
+    
+    # --------------------------------------------------
+
+    def _qtendwtem(self):
+        '''
+        Returns the tendency of tracer mixing ratio due to TEM upward wind 
+        advection in m/s2.
+        ''' 
+        # d(bar(q))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(q)/dp
+        wstar = self._omegatem()
+        return -wstar * self._dqb_dp 
 
     # --------------------------------------------------
 
-
-    def to_netcdf(self, loc=os.getcwd(), include_attrs=False):
+    def to_netcdf(self, loc=os.getcwd(), prefix=None, include_attrs=False):
         '''
         Saves all TEM quantities computed by this class to a NetCDF file.
 
@@ -742,21 +923,31 @@ class TEMDiagnostics:
                  "thetab":self.thetab , "thetap":self.thetap, "wapb":self.wapb , 
                  "wawpp":self.wapp, "upvp":self.upvp , "upvpb":self.upvpb, 
                  "upwapp":self.upwapp , "upwappb":self.upwappb,"vptp":self.vptp , 
-                 "vptpb":self.vptpb, "dub_dp":self.dub_dp, "dthetab_dp":self.dthetab_dp,
+                 "vptpb":self.vptpb, "qpvp":self.qpvp, "qpwapp":self.qpwapp, 
+                 "qpvpb":self.qpvpb, "qpwappb":self.qpwappb,
+                 "dub_dp":self.dub_dp, "dthetab_dp":self.dthetab_dp,
                  "ubcoslat":self.ubcoslat, "dubcoslat_dlat":self.dubcoslat_dlat, 
                  "psi":self.psi, "psicoslat":self.psicoslat,
                  "dpsicoslat_dlat":self.dpsicoslat_dlat, "dpsi_dp":self.dpsi_dp, 
-                 "int_vbdp":self.int_vbdp}
-        results = {"epfy":self.epfy() , "epfz":self.epfz(), "epdiv":self.epdiv() , 
-                   "vtem":self.vtem(), "omegatem":self.omegatem(), "wtem":self.wtem() , 
-                   "psitem":self.psitem(), "utendepfd":self.utendepfd() , 
-                   "utendvtem":self.utendvtem(), "utendwtem":self.utendwtem()}
+                 "int_vbdp":self.int_vbdp, "dqp_dp":self.dqb_dp, 
+                 "qbcoslat":self.qbcoslat, "dqbcoslat_dlat":self.dqbcoslat_dlat}
+        results = {"vtem":self.vtem(), "omegatem":self.omegatem(), "wtem":self.wtem(), 
+                   "psitem":self.psitem(), 
+                   "epfy":self.epfy() , "epfz":self.epfz(), "epdiv":self.epdiv()
+                   "utendepfd":self.utendepfd() , 
+                   "utendvtem":self.utendvtem(), "utendwtem":self.utendwtem(), 
+                   "etfy":self.etfy(), "etfz":self.etfz(), "etdiv":self.etdiv(), 
+                   "qtendetfd":self.qtendetfd(), 
+                   "qtendvtem":self.qtendvtem(), "qtendwtem":self.qtendwtem()}
         if(include_attrs):
             output = dict(attrs, **results)
         else:
             output = results
+
+        if prefix is not None: prefix = '{}_'.format(prefix)
+        else: prefix = ''
         
-        filename       = 'TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(
+        filename       = '{}TEM_{}_{}_p{}_L{}_poles{}_attrs{}.nc'.format(prefix,
                          self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
                          self.zm_pole_points, include_attrs)
         self._out_file = '{}/{}'.format(loc, filename)
