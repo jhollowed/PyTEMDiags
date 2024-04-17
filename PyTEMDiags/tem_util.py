@@ -36,7 +36,8 @@ class logger:
             self.stop = default_timer()
             self.timer_running = False
             self.print('elapsed time: {:.2f} seconds'.format(self.stop - self.start))
-        
+    
+# --------------------------------------------------        
 
 def multiply_lat(A, lat):
     
@@ -58,6 +59,7 @@ def multiply_lat(A, lat):
     
     return Alat
 
+# --------------------------------------------------        
 
 def multiply_p_1d(A, p):
     
@@ -79,6 +81,7 @@ def multiply_p_1d(A, p):
 
     return Ap
 
+# --------------------------------------------------        
 
 def multiply_p_3d(A, p):
     
@@ -99,6 +102,7 @@ def multiply_p_3d(A, p):
     
     return Ap
 
+# --------------------------------------------------        
 
 def lat_gradient(A, lat, logger=None):
    
@@ -121,6 +125,7 @@ def lat_gradient(A, lat, logger=None):
     
     return dA_dlat
 
+# --------------------------------------------------        
 
 def p_gradient_1d(A, p, logger=None):
     
@@ -143,6 +148,7 @@ def p_gradient_1d(A, p, logger=None):
     
     return dA_dp
 
+# --------------------------------------------------        
 
 def p_gradient_3d(A, p, logger=None):
 
@@ -197,6 +203,7 @@ def p_gradient_3d(A, p, logger=None):
     #        dA_dp[i, :, t] = np.gradient(A[i,:,t], p[i,:,t])
     #return dA_dp
 
+# --------------------------------------------------        
 
 def p_integral_1d(A, p, logger=None):
     
@@ -221,6 +228,7 @@ def p_integral_1d(A, p, logger=None):
     
     return intAdp
 
+# --------------------------------------------------        
 
 def p_integral_3d(A, p, logger=None):
 
@@ -267,3 +275,120 @@ def p_integral_3d(A, p, logger=None):
     #        intAdp[i, :, t] = np.trapz(A[i,:,t], p[i,:,t])
     #return intAdp
 
+# --------------------------------------------------        
+
+def format_latlon_data(data, lat_name='lat', lon_name='lon', 
+                       latbnd_name='lat_bnds', lonbnd_name='lon_bnds', 
+                       bnddim_name='nbnd'):
+    '''
+    This function allows users to compute TEM quantities with the PyTEMDiags 
+    package on structured lat-lon datasets. This package computes 
+    zonal averages via a spherical-harmonic method generalized for unstructred 
+    data, and so in order to use it with structured lat-lon data, the data must 
+    first be re-formatted in a way that reduces the two lat,lon horizontal 
+    dimensions to a single unstructured dimension.
+    If the data in the two original structured horizontal 
+    dimensions were of length NLAT and NLON, they are stacked in the formatted 
+    dataset to form a single dimension of length NCOL = NLAT*NLON named 'ncol'.
+    It is assumed that the structured horizontal dimensions of the input data have
+    associated coordiantes; those coordiante values will be retianed as variables 
+    in the formatted dataset.
+
+    Parameters
+    ----------
+    data : N-dimensional xarray Dataset.
+        The input structured data. Number of dimensions N must be >= 2, with
+        the horizontal dimensions specified by the parameters 'lat_name' and 'lon_name'.
+        Units of the lat dimension must be degrees, with -90, 90 degrees at the
+        poles.
+        Units of the lon dimension must be degrees from [0, 360].
+    lat_name : str, optional
+        Name of the latitude dimension. Defaults to 'lat'.
+    lon_name : str, optional
+        Name of the longitude dimension. Defaults to 'lon'.
+    latbnd_name : str, optional
+        Name of latitude bounds variable. Defaults to 'lat_bnds'.
+        If the input data does not have this variable, this argument
+        does not need to be specified. If the input data does have
+        this variable, then latbnd_name, lonbnd_name, and bnddim_name
+        all need to be specified.
+    lonbnd_name : str, optional
+        Name of longitude bounds variable. Defaults to 'lon_bnds'.
+        If the input data does not have this variable, this argument
+        does not need to be specified. If the input data does have
+        this variable, then latbnd_name, lonbnd_name, and bnddim_name
+        all need to be specified.
+    bnddim_name : str, optional
+        Name of longitude, longitude bounds dimension. Defaults to 'nbnd'.
+        If the input data has variables with names latbnnd_name and lonbnd_name, 
+        then this argument must correctly specify the dimension name used for
+        the upper and lower bounds in those variables.
+
+    Returns
+    -------
+    data : (N-1)-dimensional xarray Dataset.
+        The formatted data with an unstructed (1-D) horizontal dimension 'ncol' of 
+        length NN
+    lat_weights : 1-D xarray DaraArray
+        Vector of NCOL quaradture weights for the given lat-lon grid. These weights 
+        should be used for the 'weights' argument to sph_zonal_averager() and/or
+        the 'lat_weights' argument of TEMDiagnostics().
+    '''
+   
+    # get existing lat,lon dimensions
+    lat  = data[lat_name]
+    lon  = data[lon_name]
+
+    # build grid cell bound vectors if not exist
+    # assume that bounds of grid cells lie at midpoint between neighors
+    if not (latbnd_name in data.variables):
+        latdiff           = np.diff(np.hstack([ lat, lat[-1]+(lat[-1]-lat[-2]) ]))
+        lat_bnds          = np.vstack([lat - latdiff/2, lat + latdiff/2]).T
+        data[latbnd_name] = (lat.dims + (bnddim_name,), lat_bnds)
+    else:
+        if bnddim_name not in data[latbnd_name].dims:
+            raise RuntimeError('Variable {} does not have dimension {}. Dimensions '\
+                               'are: {}. Did you specify the latbnd_name, lonbnd_name, '\
+                               'and bnddim_name arguments to format_latlon_data() '\
+                               'correctly?'.format(latbnd_name, bnddim_name, 
+                                                   data[latbnd_names].dims))
+    if not (lonbnd_name in data.variables):
+        londiff           = np.diff(np.hstack([ lon, lon[-1]+(lon[-1]-lon[-2]) ]))
+        lon_bnds          = np.vstack([lon-londiff/2, lon + londiff/2]).T
+        data[lonbnd_name] = (lon.dims+ (bnddim_name,), lon_bnds)
+    else:
+        if bnddim_name not in data[lonbnd_name].dims:
+            raise RuntimeError('Variable {} does not have dimension {}. Dimensions '\
+                               'are: {}. Did you specify the latbnd_name, lonbnd_name, '\
+                               'and bnddim_name arguments to format_latlon_data() '\
+                               'correctly?'.format(lonbnd_name, bnddim_name, 
+                                                   data[lonbnd_names].dims))
+    # construct 1D ncol dimension
+    ncol = np.arange(0, len(lat)*len(lon))
+    data = data.stack(ncol=(lat_name, lon_name)).transpose('ncol', ...)
+
+    # save lat,lon coordinates as dataset variables.
+    lats = data[lat_name].values
+    lons = data[lon_name].values
+    
+    # remove existing lat,lon coordinates, add back as variables
+    data = data.drop_vars((lat_name, lon_name))
+    data[lat_name] = ('ncol', lats)
+    data[lon_name] = ('ncol', lons)
+
+    # compute latitude quadrature weights
+    lat_bnds    = data[latbnd_name].transpose(bnddim_name, ...)
+    lon_bnds    = data[lonbnd_name].transpose(bnddim_name, ...)
+    dlat        = np.sin(np.deg2rad(lat_bnds[1])) - np.sin(np.deg2rad(lat_bnds[0]))
+    dlon        = np.deg2rad(lon_bnds[1] - lon_bnds[0])
+    cell_areas  = dlat * dlon
+    lat_weights = cell_areas/(4*np.pi)
+
+    # verify weights
+    s = np.sum(lat_weights)
+    if not np.isclose(s, 1):
+        raise RuntimeError('Computed latitude quadrature weights are not properly normalized! '\
+                           'Are you using lat_bnds, lon_bnds properly? Was your data improperly '\
+                           'subsampled/interpolated?')
+
+    return data, lat_weights
