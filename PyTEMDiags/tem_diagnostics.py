@@ -29,8 +29,8 @@ DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
 
 
 class TEMDiagnostics:
-    def __init__(self, ua, va, ta, wap, p, q, lat_native, p0=P0, zm_dlat=1, L=150, 
-                 lat_weights=None, dim_names=DEFAULT_DIMS, log_pressure=True, 
+    def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, zm_dlat=1, L=150, 
+                 lat_weights=None, dim_names=DEFAULT_DIMS, q_tavg=None, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
                  overwrite_map=False, zm_pole_points=False, debug=False):
         '''
@@ -50,7 +50,9 @@ class TEMDiagnostics:
             (unstructured spatially 3D), with optional third temporal dimension. The 
             horizontal, vertical, and optional temporal dimensions must be named, with names
             matching those given by the argument 'dim_names'. The expected units of the 
-            coordinates are: ncol dimensionless, lev in hPa, time in hours.
+            coordinates are: ncol dimensionless, lev in hPa, time in hours. For an accurate
+            computation, all variables should be provided on temporal resolution equal to
+            or better than daily.
         va : xarray DataArray
             Northward wind, in m/s.
         ta : xarray DataArray
@@ -66,13 +68,15 @@ class TEMDiagnostics:
             If p is passed as a variable, then all derivatives are computed individually 
             per-column, and an extra remapping step is performed to return zonally avergaed 
             quantities, thus the computations are slower.
+        lat_native : xarray DataArray
+            Latitudes in degrees.
         q : xarray DataArray, or list of xarray DataArray
             dimensionless tracer mass mixing ratios (e.g. kg/kg). This arugment can support any
             arbitrary number of tracer species. If passed as a list, then the list elements 
             should each be xarray DataArrays, each corresponding to a unique tracer. Dimenionality
-            and units of the arrays should match the description of argument ua.
-        lat_native : xarray DataArray
-            Latitudes in degrees.
+            and units of the arrays should match the description of argument ua, with one exception:
+            the time dimension need not match in length (e.g. if supplying monthly-mean tracer
+            distributions). In this case, the argument q_tavg must be supplied.
         lat_weights : xarray DataArray
             Grid cell areas corresponding to grid cells at latitudes lat_native, in any units.
         p0 : float
@@ -91,10 +95,6 @@ class TEMDiagnostics:
             Defaults to: {'horz':'ncol', 'vert':'lev', 'time':'time'}. The order of the
             dimensions in the input data does not matter; data will be reshaped at 
             object initialization.
-        log_pressure : bool, optional
-            Whether or not to perform the TEM analysis in a log-pressure vertical 
-            coordinate.If False, then a pure pressure vertical coordinate is used. 
-            Defaults to True.
         grid_name : str, optional
             The 'grid_name' input argument to sph_zonal_averager(). See docstrings therein.
         zm_grid_name : str, optional
@@ -234,13 +234,13 @@ class TEMDiagnostics:
         self.L              = L
         self.debug          = debug
         self.zm_dlat        = zm_dlat
-        self.log_pres       = log_pressure
         self.dim_names      = dim_names
         self.zm_pole_points = zm_pole_points
         self.grid_name      = grid_name
         self.zm_grid_name   = zm_grid_name
         self.map_save_dest  = map_save_dest
         self.overwrite_map  = overwrite_map
+        self.q_tavg         = q_tavg
         self._ptype         = None  # pressure type, either 'coord' or 'var'; will be set 
                                     # in config_dims()
           
@@ -292,26 +292,30 @@ class TEMDiagnostics:
 
         # ---- ensure tracers are a list of DataArrays
         bad_q = False
-        if(type(self.q) is not type(list())):
-            # if q isn't a list, then only a single tracer was passed, and thus
-            # it should be a DataArray. Place this variable into a list of length-1
-            if(type(self.q) is not xr.core.dataarray.DataArray): bad_q = True
-            else: self.q = [self.q]
+        if(self.q is not None):
+            if(type(self.q) is not type(list())):
+                # if q isn't a list, then only a single tracer was passed, and thus
+                # it should be a DataArray. Place this variable into a list of length-1
+                if(type(self.q) is not xr.core.dataarray.DataArray): bad_q = True
+                else: self.q = [self.q]
+            else:
+                # if q is a list, multiple tracers were passed. All should be DataArrays
+                for qi in self.q:
+                    if(type(qi) is not xr.core.dataarray.DataArray): bad_q = True
+            if(bad_q): 
+                raise RuntimeError('tracers q must be passed as an xarray DataArray, or'\
+                                   'a list of xarray DataArrays')
+            self.ntrac = len(self.q) # record number of input tracers
         else:
-            # if q is a list, multiple tracers were passed. All should be DataArrays
-            for qi in self.q:
-                if(type(qi) is not xr.core.dataarray.DataArray): bad_q = True
-        if(bad_q): 
-            raise RuntimeError('tracers q must be passed as an xarray DataArray, or'\
-                               'a list of xarray DataArrays')
-        self.ntac = len(self.q) # record number of input tracers
+            self.ntrac = 0
         self._logger.print('Number of input tracers: {}'.format(self.ntrac))
 
         # ---- gather variables for dimensions config 
         allvars    = {'ua':self.ua, 'va':self.va, 'ta':self.ta, 
                       'wap':self.wap, 'lat':self.lat_native}
-        alltracers = dict(('q{}'.format(i), self.q[i]), for i in range(len(self.q)))
-        allvars    = {**allvars, **alltracers}
+        if(self.ntrac > 0):
+            alltracers = dict(('q{}'.format(i), self.q[i]) for i in range(len(self.q)))
+            allvars    = {**allvars, **alltracers}
 
         # ---- check if pressure was input as a coordinate (1D) or a variable (>1D)
         if len(self.p.dims) == 1 and self.p.dims[0] == self.levname:
@@ -374,7 +378,7 @@ class TEMDiagnostics:
             old_dims = self.p.dims
             self.p = self.p.transpose(*self.data_dims)
             self._logger.print('Variable p transposed: {} -> {}'.format(old_dims, self.p.dims))
-        for(i in range(len(self.q))):
+        for i in range(self.ntrac):
             old_dims = self.q[i].dims
             self.q[i] = self.q[i].transpose(*self.data_dims)
             self._logger.print('Variable q[{}] transposed: {} -> {}'.format(
@@ -438,12 +442,28 @@ class TEMDiagnostics:
             self.ta  = self.ta.reindex({self.levname, self.lev[::-1]})
             self.wap = self.wap.reindex({self.levname, self.lev[::-1]})
             self.p   = self.p.reindex({self.levname, self.lev[::-1]})
-            for i in range(len(slf.q)):
+            for i in range(self.ntrac):
                 self.q[i] = self.q[i].reindex({self.levname, self.lev[::-1]}) 
             self.lev = self.ua[self.levname]
             self._logger.print('Reversed direction of vertical dimension for all data '\
                                '(such that the model top is the leftmost entry in the '\
                                'pressure data array)')
+       
+        # ---- check shape of input tracers arrays
+        # If the shape of tracers and dynamical variables differ, this should mean that
+        # the tracers were provided on a dataset with the same spatial resolution, but 
+        # differing temportal resoltion. Ensure that this is the case, and then activate
+        # a flag for correct handling of later calculations
+        self.q_misshapen = False
+        if len(set([qi.shape for qi in self.q])) > 1:
+            raise RuntimeError('All tracers in q should have the same dimensionality')
+        if(self.q[0].shape != self.ua.shape):
+            self.q_misshapen = True
+            if(self.q[0].shape[:2] != self.ua.shape[:2]):
+                raise RuntimeError('Spatial dimensions of tracers q must match dynamical variables')
+            if(self.q_tavg is None):
+                raise RuntimeError('The shapes of q and ua do not match, in which case the '\
+                                   'argument q_tavg must be provided!')
             
     # --------------------------------------------------
     
@@ -568,7 +588,7 @@ class TEMDiagnostics:
     @property
     def dpsicoslat_dlat(self): return self._zm_return_func(self._dpsicoslat_dlat)
     @property
-    def dqb_dp(self): return self._zm_return_func(self.dqb_dp)
+    def dqb_dp(self): return self._zm_return_func(self._dqb_dp)
     @property
     def qbcoslat(self): return self._zm_return_func(self._qbcoslat)
     @property
@@ -596,12 +616,12 @@ class TEMDiagnostics:
     def utendepfd(self): return self._zm_return_func(self._utendepfd())
     def utendvtem(self): return self._zm_return_func(self._utendvtem())
     def utendwtem(self): return self._zm_return_func(self._utendwtem())
-    def etfy(self): return self._zm_return_func(self._epfy())
-    def etfz(self): return self._zm_return_func(self._epfz())
-    def etdiv(self): return self._zm_return_func(self._epdiv())
-    def qtendetfd(self): return self._zm_return_func(self._utendepfd())
-    def qtendvtem(self): return self._zm_return_func(self._utendvtem())
-    def qtendwtem(self): return self._zm_return_func(self._utendwtem())
+    def etfy(self, qi=None): return self._zm_return_func(self._etfy(qi))
+    def etfz(self, qi=None): return self._zm_return_func(self._etfz(qi))
+    def etdiv(self, qi=None): return self._zm_return_func(self._etdiv(qi))
+    def qtendetfd(self, qi=None): return self._zm_return_func(self._qtendetfd(qi))
+    def qtendvtem(self, qi=None): return self._zm_return_func(self._qtendvtem(qi))
+    def qtendwtem(self, qi=None): return self._zm_return_func(self._qtendwtem(qi))
 
     # --------------------------------------------------
     
@@ -645,9 +665,10 @@ class TEMDiagnostics:
         self._wapb.name   = 'wapb'
         self._wapp        = self.wap - self.ZM.sph_zonal_mean_native(self.wap)
         self._wapp.name   = 'wapp'
+        
         self._logger.print('computing zonal means for tracers...')
-        self._qb, self.qp = [None]*self.ntrac, [None]*welf.ntrac
-        for i in range(len(self.ntrac)): 
+        self._qb, self._qp = [None]*self.ntrac, [None]*self.ntrac
+        for i in range(self.ntrac): 
             self._qb[i]       = self._zonal_mean(self.q[i])
             self._qb[i].name  = 'qb'
             self._qp[i]       = self.q[i] - self.ZM.sph_zonal_mean_native(self.q[i])
@@ -672,18 +693,26 @@ class TEMDiagnostics:
         self._vptp.name    = 'vptp'
         self._vptpb        = self._zonal_mean(self._vptp)
         self._vptpb.name   = 'vptpb'
-        self._logger.print('computing tracer fluxes and tracer flux zonal means...')
-        self._qpvp, self.qpvpb     = [None]*self.ntrac, [None]*welf.ntrac
-        self._qpwapp, self.qpwappb = [None]*self.ntrac, [None]*welf.ntrac
-        for i in range(len(self.ntrac)): 
-            self._qpvp[i]       = self._qp[i] * self._vp
-            self._qpvp[i].name  = 'qpvp'
-            self._qpvpb[i]      = self._zonal_mean(self._qpvp[i])
-            self._qpvpb[i].name = 'qpvpb'
-            self._qpwap[i]       = self._qp[i] * self._wap
-            self._qpwap[i].name  = 'qpwap'
-            self._qpwapb[i]      = self._zonal_mean(self._qpwap[i])
-            self._qpwapb[i].name = 'qpwapb'
+        
+        self._logger.print('computing tracer fluxes and tracer flux zonal means...') 
+        if(self.q_misshapen):
+            vp   = self._vp.groupby('time.{}'.format(self.q_tavg)).mean('time')
+            wapp = self._wapp.groupby('time.{}'.format(self.q_tavg)).mean('time')
+        else:
+            vp   = self._vp
+            wapp = self._wapp
+        
+        self._qpvp, self._qpvpb     = [None]*self.ntrac, [None]*self.ntrac
+        self._qpwapp, self._qpwappb = [None]*self.ntrac, [None]*self.ntrac
+        for i in range(self.ntrac): 
+            self._qpvp[i]         = self._qp[i] * vp
+            self._qpvp[i].name    = 'qpvp'
+            self._qpvpb[i]        = self._zonal_mean(self._qpvp[i])
+            self._qpvpb[i].name   = 'qpvpb'
+            self._qpwapp[i]       = self._qp[i] * wapp
+            self._qpwapp[i].name  = 'qpwapp'
+            self._qpwappb[i]      = self._zonal_mean(self._qpwapp[i])
+            self._qpwappb[i].name = 'qpwappb'
     
     # --------------------------------------------------
     
@@ -706,10 +735,13 @@ class TEMDiagnostics:
        
         self._int_vbdp  = self._p_integral(self._vb, self.p, self._logger)
         
-        # tracers
-        self._dqb_dp          = self._p_gradient(self._qb, self.p, self._logger)
-        self._qbcoslat        = self._multiply_lat(self._qb, self.coslat)
-        self._dqbcoslat_dlat  = lat_gradient(self._qbcoslat, np.deg2rad(self.lat))
+        self._dqb_dp         = [None]*self.ntrac
+        self._qbcoslat       = [None]*self.ntrac
+        self._dqbcoslat_dlat = [None]*self.ntrac
+        for i in range(self.ntrac):
+            self._dqb_dp[i]          = self._p_gradient(self._qb[i], self.p, self._logger)
+            self._qbcoslat[i]        = self._multiply_lat(self._qb[i], self.coslat)
+            self._dqbcoslat_dlat[i]  = lat_gradient(self._qbcoslat[i], np.deg2rad(self.lat))
 
     # --------------------------------------------------
 
@@ -781,7 +813,7 @@ class TEMDiagnostics:
         # the functions epfy and epfz compute the log-pressure versions of the 
         # vector components, while the present calculation requires the pressure
         # versions. Cancel the conversion factors first
-        Fphi = self.multiply_pres(self._epfy(), self.p0/self.p)
+        Fphi = self._multiply_pres(self._epfy(), self.p0/self.p)
         Fp   = self._epfz() * -self.p0/H
        
         Fphicoslat       = self._multiply_lat(Fphi, self.coslat)
@@ -827,41 +859,92 @@ class TEMDiagnostics:
 
     # --------------------------------------------------
     
-    def _etfy(self):
+    def _etfy(self, qi=None):
         '''
         Returns the northward component of the eddy tracer flux in m2/s, in log-pressure 
         coordinate
+
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
         '''
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+                  'qi must be passed to etfy() when len(q) > 1!')
+
+        if(self.q_misshapen):
+            psi = self._psi.groupby('time.{}'.format(self.q_tavg)).mean('time')
+            dqb_dp = self._dqb_dp[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
+            qpvpb = self._qpvpb[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
+        else:
+            psi = self._psi
+            dqb_dp = self._dqb_dp[qi]
+            qpvpb = self._qpvpb[qi]
+
+        pdb.set_trace()
+
         # ^M_Φ = p/p0 * ( a*cos(φ) * (d(bar(q))/dp * ψ - bar(q'*v') ))
-        x = self._multiply_lat(self._dqb_dp * self._psi - self._qpvpb, a*self.coslat)
+        x = self._multiply_lat(dqb_dp * psi - qpvpb, a*self.coslat)
         return self._multiply_pres(x, self.p/self.p0)
     
     # --------------------------------------------------
 
-    def _etfz(self):
+    def _etfz(self, qi=None):
         '''
         Returns the upward component of the eddy tracer flux in m2/s, in log-pressure 
         coordinate
-        ''' 
+        
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
+        '''
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+                  'qi must be passed to etfz() when len(q) > 1!')
+        
         if(self._ptype == 'var'): f = self.f
         else: f = self.f[:, np.newaxis, np.newaxis]
 
+        if(self.q_misshapen):
+            psi = self._psi.groupby('time.{}'.format(self.q_tavg)).mean('time')
+            dqbcoslat_dlat = self._dqbcoslat_dlat[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
+            qpwappb = self._qpwappb[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
+        else:
+            psi = self._psi
+            dqbcoslat_dlat = self._dqbcoslat_dlat[qi]
+            qpwappb = self._qpwappb[qi]
+
         # ^M_z = -H/p0 * a*cos(φ) * ( -1/(a*cos(φ)) * d(bar(q)*cos(φ))/dφ )*ψ - bar(q'*ω'))
-        x = -self._multiply_lat(self._dqbcoslat_dlat, 1/(a*self.coslat))
-        return -H/self.p0 * self._multiply_lat((x*self._psi - self._qpwappb), a*self.coslat)
+        x = -self._multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
+        return -H/self.p0 * self._multiply_lat((x*psi - qpwappb), a*self.coslat)
     
     # --------------------------------------------------
 
-    def _etdiv(self):
+    def _etdiv(self, qi=None):
         '''
         Returns the EP flux divergence.
+        
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
         '''
+        
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+                 'qi must be passed to etdiv() when len(q) > 1!')
+        
         # ∇ * M = 1/(a * cos(φ)) * d(M_φ*cos(φ))/dφ + d(F_p)/dp
         # the functions etfy and etfz compute the log-pressure versions of the 
         # vector components, while the present calculation requires the pressure
         # versions. Cancel the conversion factors first
-        Mphi = self.multiply_pres(self._etfy(), self.p0/self.p)
-        Mp   = self._eptz() * -self.p0/H
+        Mphi = self._multiply_pres(self._etfy(qi), self.p0/self.p)
+        Mp   = self._etfz(qi) * -self.p0/H
        
         Mphicoslat       = self._multiply_lat(Mphi, self.coslat)
         dMphicoslat_dlat = lat_gradient(Mphicoslat, np.deg2rad(self.lat))
@@ -871,40 +954,86 @@ class TEMDiagnostics:
   
     # --------------------------------------------------
  
-    def _qtendetfd(self):
+    def _qtendetfd(self, qi=None):
         '''
         Returns the tendency of tracer mixing ratios due to eddy tracer flux 
         divergence in m/s2.
+        
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
         '''
+        
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+             'qi must be passed to qtendetfd() when len(q) > 1!')
+        
         # d(bar(q))/dt|_(∇ * M) = (∇ * M) / (a*cos(φ))
-        return self._multiply_lat(self._etdiv(), 1/(a * self.coslat))
+        return self._multiply_lat(self._etdiv(qi), 1/(a * self.coslat))
 
     
     # --------------------------------------------------
  
-    def _qtendvtem(self):
+    def _qtendvtem(self, qi=None):
         '''
         Returns the tendency of tracer mixing ratios due to TEM northward wind 
         advection in m/s2.
+        
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
         '''
+        
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+             'qi must be passed to qtendvtem() when len(q) > 1!')
+        
         if(self._ptype == 'var'): f = self.f
         else: f = self.f[:, np.newaxis, np.newaxis]
         
+        if(self.q_misshapen):
+            vstar = self._vtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
+            dqbcoslat_dlat = self._dqbcoslat_dlat[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
+        else:
+            vstar = self._vtem()
+            dqbcoslat_dlat = self._dqbcoslat_dlat[qi]
+        
         # d(bar(q))/dt|_adv(bar(v)*) = -bar(v)* * (1/(a*cos(φ)) * d(bar(q)cos(φ))/dφ)
-        vstar = self._vtem()
-        diff  = self._multiply_lat(self._dqbcoslat_dlat, 1/(a*self.coslat)))
+        diff  = self._multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
         return -vstar * diff
     
     # --------------------------------------------------
 
-    def _qtendwtem(self):
+    def _qtendwtem(self, qi=None):
         '''
         Returns the tendency of tracer mixing ratio due to TEM upward wind 
         advection in m/s2.
-        ''' 
+        
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
+        '''
+        
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+             'qi must be passed to qtendwtem() when len(q) > 1!')
+        
+        if(self.q_misshapen):
+            wstar = self._wtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
+            dqb_dp = self._dqb_dp[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
+        else:
+            wstar = self._wtem()
+            dqb_dp = self._dqb_dp[qi]
+        
         # d(bar(q))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(q)/dp
         wstar = self._omegatem()
-        return -wstar * self._dqb_dp 
+        return -wstar * dqb_dp 
 
     # --------------------------------------------------
 
@@ -936,8 +1065,8 @@ class TEMDiagnostics:
                  "qbcoslat":self.qbcoslat, "dqbcoslat_dlat":self.dqbcoslat_dlat}
         results = {"vtem":self.vtem(), "omegatem":self.omegatem(), "wtem":self.wtem(), 
                    "psitem":self.psitem(), 
-                   "epfy":self.epfy() , "epfz":self.epfz(), "epdiv":self.epdiv()
-                   "utendepfd":self.utendepfd() , 
+                   "epfy":self.epfy(), "epfz":self.epfz(), "epdiv":self.epdiv(),
+                   "utendepfd":self.utendepfd(), 
                    "utendvtem":self.utendvtem(), "utendwtem":self.utendwtem(), 
                    "etfy":self.etfy(), "etfz":self.etfz(), "etdiv":self.etdiv(), 
                    "qtendetfd":self.qtendetfd(), 
