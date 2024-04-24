@@ -1173,6 +1173,9 @@ class TEMDiagnostics:
             Defaults to false, in which case only the quantities computed by
             the class methods are written.
         '''
+        
+        if prefix is not None: prefix = '{}_'.format(prefix)
+        else: prefix = ''
 
         # get tracer names
         tracer_names = [qii.name for qii in self.q]
@@ -1194,10 +1197,7 @@ class TEMDiagnostics:
                 output = dict(attrs, **results)
             else:
                 output = results
-
-            if prefix is not None: prefix = '{}_'.format(prefix)
-            else: prefix = ''
-            
+ 
             filename       = '{}TEM_{}_{}_p{}_L{}_poles{}_attrs{}_TRACER-{}.nc'.format(prefix,
                              self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
                              self.zm_pole_points, include_attrs, tracer_names[i])
