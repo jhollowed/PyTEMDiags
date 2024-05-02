@@ -217,6 +217,9 @@ class TEMDiagnostics:
         out_file : str
             Output filename, used for naming data files written by the to_netcdf() method. 
             Simple string that contains metadata about the current TEM option configuration.
+        q_out_file : str
+            Output filename, used for naming tracer data files written by the q_to_netcdf() method. 
+            Simple string that contains metadata about the current TEM option configuration.
         '''
 
         self._logger = util.logger(debug_level>0, header=True)
@@ -273,8 +276,9 @@ class TEMDiagnostics:
         self._compute_fluxes()
         self._compute_derivatives()
         
-        # ---- output filename used by self.to_netcdf()
+        # ---- output filename used by self.to_netcdf() and self.q_to_netcdf()
         self._out_file = None
+        self._q_out_file = None
      
     # --------------------------------------------------
 
@@ -608,6 +612,11 @@ class TEMDiagnostics:
         if(self._out_file is None):
             warnings.warn('\'out_file\' is not set until to_netcdf() is called')
         return self._out_file
+    @property
+    def q_out_file(self): 
+        if(self._q_out_file is None):
+            warnings.warn('\'q_out_file\' is not set until to_netcdf() is called')
+        return self._q_out_file
     
     def vtem(self): return self._zm_return_func(self._vtem())
     def omegatem(self): return self._zm_return_func(self._omegatem())
@@ -1151,6 +1160,7 @@ class TEMDiagnostics:
         dataset = xr.Dataset(output)
         dataset.to_netcdf(self._out_file)
         self._logger.print('wrote TEM data to {}'.format(self._out_file))
+        return self._out_file
     
     # --------------------------------------------------
 
@@ -1201,11 +1211,12 @@ class TEMDiagnostics:
             filename       = '{}TEM_{}_{}_p{}_L{}_poles{}_attrs{}_TRACER-{}.nc'.format(prefix,
                              self.ZM.grid_name, self.ZM.grid_out_name, self._ptype, self.L, 
                              self.zm_pole_points, include_attrs, tracer_names[i])
-            self._out_file = '{}/{}'.format(loc, filename)
+            self._q_out_file = '{}/{}'.format(loc, filename)
 
             dataset = xr.Dataset(output)
-            dataset.to_netcdf(self._out_file)
+            dataset.to_netcdf(self._q_out_file)
             self._logger.print('wrote {} tracer TEM data to {}'.format(tracer_names[i], self._out_file))
+            return self._q_out_file
         
 
 # =========================================================================
