@@ -206,10 +206,6 @@ def format_latlon_data(data, lat_name='lat', lon_name='lon',
     data : (N-1)-dimensional xarray Dataset.
         The formatted data with an unstructed (1-D) horizontal dimension 'ncol' of 
         length NN
-    lat_weights : 1-D xarray DaraArray
-        Vector of NCOL quaradture weights for the given lat-lon grid. These weights 
-        should be used for the 'weights' argument to sph_zonal_averager() and/or
-        the 'lat_weights' argument of TEMDiagnostics().
     '''
    
     # get existing lat,lon dimensions
@@ -253,19 +249,4 @@ def format_latlon_data(data, lat_name='lat', lon_name='lon',
     data[lat_name] = ('ncol', lats)
     data[lon_name] = ('ncol', lons)
 
-    # compute latitude quadrature weights
-    lat_bnds    = data[latbnd_name].transpose(bnddim_name, ...)
-    lon_bnds    = data[lonbnd_name].transpose(bnddim_name, ...)
-    dlat        = np.sin(np.deg2rad(lat_bnds[1])) - np.sin(np.deg2rad(lat_bnds[0]))
-    dlon        = np.deg2rad(lon_bnds[1] - lon_bnds[0])
-    cell_areas  = dlat * dlon
-    lat_weights = cell_areas/(4*np.pi)
-
-    # verify weights
-    s = np.sum(lat_weights)
-    if not np.isclose(s, 1):
-        raise RuntimeError('Computed latitude quadrature weights are not properly normalized! '\
-                           'Are you using lat_bnds, lon_bnds properly? Was your data improperly '\
-                           'subsampled/interpolated?')
-
-    return data, lat_weights
+    return data

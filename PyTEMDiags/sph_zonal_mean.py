@@ -69,6 +69,7 @@ class sph_zonal_averager:
             If weights are not available to be passed, the result of the  inversion method 
             will be written out to file so that subsequent usage of this utility with the 
             same pair of input and output grids will be fast.
+            **DEPRECATED; LSTSQ SOLVER IS GOOD ENOUGH**
         grid_name : str, optional
             Name of the native grid. Used for naming the file which the
             averaging and remap matrices will be saved to, as:

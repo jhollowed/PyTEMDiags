@@ -30,7 +30,7 @@ DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
 
 class TEMDiagnostics:
     def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, zm_dlat=1, L=150, 
-                 lat_weights=None, dim_names=DEFAULT_DIMS, q_tavg=None, 
+                 dim_names=DEFAULT_DIMS, q_tavg=None, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
                  overwrite_map=False, zm_pole_points=False, debug_level=0):
         '''
@@ -70,8 +70,6 @@ class TEMDiagnostics:
             and units of the arrays should match the description of argument ua, with one exception:
             the time dimension need not match in length (e.g. if supplying monthly-mean tracer
             distributions). In this case, the argument q_tavg must be supplied.
-        lat_weights : xarray DataArray
-            Grid cell areas corresponding to grid cells at latitudes lat_native, in any units.
         p0 : float
             Reference pressure in Pa. Defaults to the DynVarMIP value in constants.py
         zm_dlat : float, optional
@@ -228,7 +226,6 @@ class TEMDiagnostics:
         self.q     = q    # tracer mixing ratios [kg/kg]
         self.ntrac = None # number of input tracers
         self.lat_native  = lat_native   # latitudes [deg]
-        self.lat_weights = lat_weights  # latitude weights (grid cell areas)
         # options
         self.L              = L
         self.zm_dlat        = zm_dlat
@@ -246,8 +243,7 @@ class TEMDiagnostics:
         
         # ---- construct zonal averaging obeject
         self._logger.print('Getting zonal averaging matrices...')
-        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L, 
-                                     weights=self.lat_weights,  
+        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L,  
                                      grid_name=grid_name, grid_out_name=zm_grid_name, 
                                      save_dest=map_save_dest, debug=debug_level>1, 
                                      overwrite=overwrite_map)
