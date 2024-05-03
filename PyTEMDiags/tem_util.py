@@ -8,6 +8,7 @@
     
 
 import pdb
+import scipy
 import numpy as np
 import xarray as xr
 from timeit import default_timer
@@ -17,6 +18,9 @@ from timeit import default_timer
 
 
 class logger:
+    '''
+    Logger object used for controlling runtime output statements
+    '''
     def __init__(self, debug, name='PyTEMDiags', header=False):
         self.debug = debug
         self.name  = name
@@ -40,6 +44,21 @@ class logger:
 # --------------------------------------------------        
 
 def multiply_lat(A, lat):
+    '''
+    Multiply data and a latitude quantitiy
+
+    Parameters
+    ----------
+    A : xarray DataArray
+        The data, with latitude in the first dimension
+    lat : xarray DataArray
+        1D latitude quantity
+
+    Returns
+    ------
+    Alat : xarray DataArray
+        Product of A and lat
+    '''
     
     if(not isinstance(A, xr.core.dataarray.DataArray)): 
         A = xr.DataArray(A)
@@ -62,6 +81,21 @@ def multiply_lat(A, lat):
 # --------------------------------------------------        
 
 def multiply_p(A, p):
+    '''
+    Multiply data and a pressure quantitiy
+
+    Parameters
+    ----------
+    A : xarray DataArray
+        The data, with pressure in the second dimension
+    p : xarray DataArray
+        1D pressure quantity
+
+    Returns
+    ------
+    Ap : xarray DataArray
+        Product of A and p
+    '''
     
     if(not isinstance(A, xr.core.dataarray.DataArray)): 
         A = xr.DataArray(A)
@@ -83,7 +117,22 @@ def multiply_p(A, p):
 
 # --------------------------------------------------        
 
-def lat_gradient(A, lat, logger=None):
+def lat_gradient(A, lat):
+    '''
+    Takes a horizontal gradient of a dataset in latitude
+
+    Parameters
+    ----------
+    A : xarray DataArray
+        The data, with latitude in the first dimension
+    lat : xarray DataArray
+        1D latitude quantity
+
+    Returns
+    ------
+    dA_dlat : xarray DataArray
+        gradient of A in lat
+    '''
    
     if(not isinstance(A, xr.core.dataarray.DataArray)): 
         A = xr.DataArray(A)
@@ -106,7 +155,22 @@ def lat_gradient(A, lat, logger=None):
 
 # --------------------------------------------------        
 
-def p_gradient(A, p, logger=None):
+def p_gradient(A, p):
+    '''
+    Takes a vertical gradient of a dataset in pressure
+
+    Parameters
+    ----------
+    A : xarray DataArray
+        The data, with pressure in the second dimension
+    p : xarray DataArray
+        1D pressure quantity
+
+    Returns
+    ------
+    dA_dp : xarray DataArray
+        gradient of A in p
+    '''
     
     if(not isinstance(A, xr.core.dataarray.DataArray)): 
         A = xr.DataArray(A)
@@ -129,7 +193,22 @@ def p_gradient(A, p, logger=None):
 
 # --------------------------------------------------        
 
-def p_integral(A, p, logger=None):
+def p_integral(A, p):
+    '''
+    Takes a vertical integral of a dataset in pressure
+
+    Parameters
+    ----------
+    A : xarray DataArray
+        The data, with pressure in the second dimension
+    p : xarray DataArray
+        1D pressure quantity
+
+    Returns
+    ------
+    intAdp : xarray DataArray
+        integral of A in p
+    '''
     
     if(not isinstance(A, xr.core.dataarray.DataArray)): 
         A = xr.DataArray(A)
@@ -152,7 +231,76 @@ def p_integral(A, p, logger=None):
     
     return intAdp
 
-# --------------------------------------------------        
+# --------------------------------------------------
+
+def p_interp(data, hyam, hybm, plevout, ps, intyp=2, p0=1000, kxtrp=False):
+    '''
+    Interpolates data defined on CAM hybrid ("sigma") coordinates to pressure coordinates.
+    Specifically, a linear interpolation is performed in log-pressure space.
+    Note that the expected units of plevout and p0 are hPa, while the expected units of 
+    ps is Pa.
+
+    Paramters
+    ---------
+    data : xarray DataArray
+        The data, with pressure in the second dimension
+    hyam : xarray DataArray
+        1D array giving the hybrid model level A coefficients. Must match the 
+        pressure dimension of the data in length and dimension name
+    hyab : xarray DataArray
+        1D array giving the hybrid model level B coefficients. Must match the 
+        pressure dimension of the data in length and dimension name
+    plevout : array-like
+        1D array giving the output pressure levels in hPa. Must be monotonically
+        increasing (top-to-bottom)
+    ps : xarray DataArray
+        Surface pressure in Pa. Must have the same dimension sizes as the 
+        corresponding (by dimension name) dimensions of the argument data (minus 
+        the level dimension).
+    p0 : float, optional
+        Surface refnerence pressure in hPa. Defaults to 1000 hPa.
+    kxtrp : bool, optional
+        Whether or not to extrapolate data values when the output pressure is 
+        outside of the range of the surface pressure (i.e. below the ground). 
+        Defaults to False, in which case datapoints below the ground are returned
+        with values of NaN.
+    '''
+
+
+    # get dimensions of input data
+    in_dims   = list(data.dims)
+    lev_name  = in_dims[1]
+    
+    # transpose data with pressure in the first dimension
+    op_dims = [in_dims[0]] + in_dims[2:] + [lev_name]
+    data = data.transpose(*op_dims) 
+
+    # get dimensions of output data
+    out_dims = op_dims[:-1] + ['plev']
+    data_interp = xr.zeros_like(data.reindex({lev_name:range(len(plevout))}))
+    data_interp = data_interp.rename({lev_name:'plev'})
+    data_interp = data_interp.assign_coords(plev=plevout.values)
+
+    # get gridpoint pressure in hPa
+    p = hyam * (p0*100) + hybm * ps
+    p = p.transpose(*op_dims) / 100
+
+    # set extrapolation option
+    if(kxtrp): fill_value = 'extrapolate'
+    else: fill_value = float('nan')
+    
+    # interpolate
+    for idx in np.ndindex(data_interp.shape[:-1]):
+        print('k = {}'.format(idx))
+        interp = scipy.interpolate.interp1d(np.log10(p[idx]), data[idx], kind='linear', 
+                                            axis=0, bounds_error=False, fill_value=fill_value, 
+                                            assume_sorted=True)
+        data_interp[idx] = interp(np.log10(plevout))
+
+    pdb.set_trace()
+
+
+# --------------------------------------------------
 
 def format_latlon_data(data, lat_name='lat', lon_name='lon', 
                        latbnd_name='lat_bnds', lonbnd_name='lon_bnds', 

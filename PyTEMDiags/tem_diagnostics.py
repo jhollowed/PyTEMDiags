@@ -214,6 +214,8 @@ class TEMDiagnostics:
         '''
 
         self._logger = util.logger(debug_level>0, header=True)
+
+        self.util=util
         
         # ---- get input args
         # variables
@@ -604,9 +606,9 @@ class TEMDiagnostics:
         Computes vertical and meridional derivatives, and their zonal averages.
         '''
         self._logger.print('computing psi, vertical derivatives, meridional derivatives...')
-        self._dub_dp          = util.p_gradient(self._ub, self.p, self._logger)
+        self._dub_dp          = util.p_gradient(self._ub, self.p)
         self._dub_dp.name     ='dub_dp'
-        self._dthetab_dp      = util.p_gradient(self._thetab, self.p, self._logger)
+        self._dthetab_dp      = util.p_gradient(self._thetab, self.p)
         self._dthetab_dp.name = 'dthetab_dp'
 
         self._ubcoslat        = util.multiply_lat(self._ub, self.coslat)
@@ -621,17 +623,17 @@ class TEMDiagnostics:
         self._psicoslat.name       = 'psicoslat'
         self._dpsicoslat_dlat      = util.lat_gradient(self._psicoslat, np.deg2rad(self.lat))
         self._dpsicoslat_dlat.name = 'dpsicoslat_dlat'
-        self._dpsi_dp              = util.p_gradient(self._psi, self.p, self._logger) 
+        self._dpsi_dp              = util.p_gradient(self._psi, self.p) 
         self._dpsi_dp.name         = 'dpsi_dp'
        
-        self._int_vbdp      = util.p_integral(self._vb, self.p, self._logger)
+        self._int_vbdp      = util.p_integral(self._vb, self.p)
         self._int_vbdp.name = 'int_vbdp'
         
         self._dqb_dp         = [None]*self.ntrac
         self._qbcoslat       = [None]*self.ntrac
         self._dqbcoslat_dlat = [None]*self.ntrac
         for i in range(self.ntrac):
-            self._dqb_dp[i]              = util.p_gradient(self._qb[i], self.p, self._logger)
+            self._dqb_dp[i]              = util.p_gradient(self._qb[i], self.p)
             self._dqb_dp[i].name         = 'dqb_dp'
             self._qbcoslat[i]            = util.multiply_lat(self._qb[i], self.coslat)
             self._qbcoslat[i].name       = 'dqbcoslat'
