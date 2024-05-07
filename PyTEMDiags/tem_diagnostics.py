@@ -30,7 +30,7 @@ DEFAULT_DIMS = {'horz':'ncol', 'vert':'plev', 'time':'time'}
 
 class TEMDiagnostics:
     def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, 
-                 zm_dlat=1, L=150, dim_names=DEFAULT_DIMS, q_tavg=None, 
+                 zm_dlat=1, L=150, dim_names=DEFAULT_DIMS, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
                  overwrite_map=False, zm_pole_points=False, debug_level=0):
         '''
@@ -67,9 +67,7 @@ class TEMDiagnostics:
             dimensionless tracer mass mixing ratios (e.g. kg/kg). This arugment can support any
             arbitrary number of tracer species. If passed as a list, then the list elements 
             should each be xarray DataArrays, each corresponding to a unique tracer. Dimenionality
-            and units of the arrays should match the description of argument ua, with one exception:
-            the time dimension need not match in length (e.g. if supplying monthly-mean tracer
-            distributions). In this case, the argument q_tavg must be supplied.
+            and units of the arrays should match the description of the other variables.
         p0 : float
             Reference pressure in Pa. Defaults to the DynVarMIP value in constants.py
         zm_dlat : float, optional
@@ -235,7 +233,6 @@ class TEMDiagnostics:
         self.zm_grid_name   = zm_grid_name
         self.map_save_dest  = map_save_dest
         self.overwrite_map  = overwrite_map
-        self.q_tavg         = q_tavg
         self.debug_level    = debug_level
           
         # ---- veryify input data dimensions, configure data and settings
@@ -409,23 +406,7 @@ class TEMDiagnostics:
         # shorthand for quantities used in TEM calculations
         self.lat, self.coslat  = self.lat_zm, self._coslat_zm
         self.f                 = self._f_zm[:, np.newaxis, np.newaxis]
- 
-        # ---- check shape of input tracers arrays
-        # If the shape of tracers and dynamical variables differ, this should mean that
-        # the tracers were provided on a dataset with the same spatial resolution, but 
-        # differing temportal resoltion. Ensure that this is the case, and then activate
-        # a flag for correct handling of later calculations
-        self.q_misshapen = False
-        if len(set([qi.shape for qi in self.q])) > 1:
-            raise RuntimeError('All tracers in q should have the same dimensionality')
-        if(self.q[0].shape != self.ua.shape):
-            self.q_misshapen = True
-            if(self.q[0].shape[:2] != self.ua.shape[:2]):
-                raise RuntimeError('Spatial dimensions of tracers q must match dynamical variables')
-            if(self.q_tavg is None):
-                raise RuntimeError('The shapes of q and ua do not match, in which case the '\
-                                   'argument q_tavg must be provided!')
-            
+  
     # --------------------------------------------------
     
     '''
@@ -577,22 +558,14 @@ class TEMDiagnostics:
         self._vptpb        = self._zonal_mean(self._vptp)
         self._vptpb.name   = 'vptpb'
         
-        self._logger.print('computing tracer fluxes and tracer flux zonal means...') 
-        if(self.q_misshapen):
-            vp   = self._vp.groupby('time.{}'.format(self.q_tavg)).mean('time')
-            wapp = self._wapp.groupby('time.{}'.format(self.q_tavg)).mean('time')
-        else:
-            vp   = self._vp
-            wapp = self._wapp
-        
         self._qpvp, self._qpvpb     = [None]*self.ntrac, [None]*self.ntrac
         self._qpwapp, self._qpwappb = [None]*self.ntrac, [None]*self.ntrac
         for i in range(self.ntrac): 
-            self._qpvp[i]         = self._qp[i] * vp
+            self._qpvp[i]         = self._qp[i] * self._vp
             self._qpvp[i].name    = 'qpvp'
             self._qpvpb[i]        = self._zonal_mean(self._qpvp[i])
             self._qpvpb[i].name   = 'qpvpb'
-            self._qpwapp[i]       = self._qp[i] * wapp
+            self._qpwapp[i]       = self._qp[i] * self._wapp
             self._qpwapp[i].name  = 'qpwapp'
             self._qpwappb[i]      = self._zonal_mean(self._qpwapp[i])
             self._qpwappb[i].name = 'qpwappb'
@@ -803,14 +776,9 @@ class TEMDiagnostics:
         elif(qi is None and self.ntrac > 1): raise RuntimeError(
                   'qi must be passed to etfy() when len(q) > 1!')
 
-        if(self.q_misshapen):
-            psi = self._psi.groupby('time.{}'.format(self.q_tavg)).mean('time')
-            dqb_dp = self._dqb_dp[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
-            qpvpb = self._qpvpb[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
-        else:
-            psi = self._psi
-            dqb_dp = self._dqb_dp[qi]
-            qpvpb = self._qpvpb[qi]
+        psi = self._psi
+        dqb_dp = self._dqb_dp[qi]
+        qpvpb = self._qpvpb[qi]
 
         # ^M_Φ = p/p0 * ( a*cos(φ) * (d(bar(q))/dp * ψ - bar(q'*v') ))
         x    = util.multiply_lat(dqb_dp * psi - qpvpb, a*self.coslat)
@@ -837,14 +805,9 @@ class TEMDiagnostics:
         elif(qi is None and self.ntrac > 1): raise RuntimeError(
                   'qi must be passed to etfz() when len(q) > 1!')
         
-        if(self.q_misshapen):
-            psi = self._psi.groupby('time.{}'.format(self.q_tavg)).mean('time')
-            dqbcoslat_dlat = self._dqbcoslat_dlat[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
-            qpwappb = self._qpwappb[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
-        else:
-            psi = self._psi
-            dqbcoslat_dlat = self._dqbcoslat_dlat[qi]
-            qpwappb = self._qpwappb[qi]
+        psi = self._psi
+        dqbcoslat_dlat = self._dqbcoslat_dlat[qi]
+        qpwappb = self._qpwappb[qi]
 
         # ^M_z = -H/p0 * a*cos(φ) * ( -1/(a*cos(φ)) * d(bar(q)*cos(φ))/dφ )*ψ - bar(q'*ω'))
         x    = -util.multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
@@ -927,12 +890,8 @@ class TEMDiagnostics:
         elif(qi is None and self.ntrac > 1): raise RuntimeError(
              'qi must be passed to qtendvtem() when len(q) > 1!')
         
-        if(self.q_misshapen):
-            vstar = self.vtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
-            dqbcoslat_dlat = self._dqbcoslat_dlat[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
-        else:
-            vstar = self.vtem()
-            dqbcoslat_dlat = self._dqbcoslat_dlat[qi]
+        vstar = self.vtem()
+        dqbcoslat_dlat = self._dqbcoslat_dlat[qi]
         
         # d(bar(q))/dt|_adv(bar(v)*) = -bar(v)* * (1/(a*cos(φ)) * d(bar(q)cos(φ))/dφ)
         diff      = util.multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
@@ -959,12 +918,8 @@ class TEMDiagnostics:
         elif(qi is None and self.ntrac > 1): raise RuntimeError(
              'qi must be passed to qtendwtem() when len(q) > 1!')
         
-        if(self.q_misshapen):
-            wstar = self.wtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
-            dqb_dp = self._dqb_dp[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
-        else:
-            wstar = self.wtem()
-            dqb_dp = self._dqb_dp[qi]
+        wstar = self.wtem()
+        dqb_dp = self._dqb_dp[qi]
         
         # d(bar(q))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(q)/dp
         wstar     = self.omegatem()
