@@ -22,15 +22,15 @@ from .constants import *
 from .sph_zonal_mean import *
 
 # ---- global constants
-DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
+DEFAULT_DIMS = {'horz':'ncol', 'vert':'plev', 'time':'time'}
 
 
 # -------------------------------------------------------------------------
 
 
 class TEMDiagnostics:
-    def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, zm_dlat=1, L=150, 
-                 dim_names=DEFAULT_DIMS, q_tavg=None, 
+    def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, 
+                 zm_dlat=1, L=150, dim_names=DEFAULT_DIMS, q_tavg=None, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
                  overwrite_map=False, zm_pole_points=False, debug_level=0):
         '''
@@ -214,9 +214,7 @@ class TEMDiagnostics:
         '''
 
         self._logger = util.logger(debug_level>0, header=True)
-
-        self.util=util
-        
+         
         # ---- get input args
         # variables
         self.p     = p    # pressure [Pa]
@@ -278,11 +276,11 @@ class TEMDiagnostics:
 
         # ---- get dim names
         self.ncolname   = self.dim_names['horz']
-        self.levname    = self.dim_names['vert']
+        self.plevname    = self.dim_names['vert']
         # use default time dim name if not present in data
         try: self.timename   = self.dim_names['time']
         except KeyError: self.timename = DEFAULT_DIMS['time']
-        self.data_dims = (self.ncolname, self.levname, self.timename)
+        self.data_dims = (self.ncolname, self.plevname, self.timename)
 
         # ---- ensure tracers are a list of DataArrays
         bad_q = False
@@ -330,7 +328,7 @@ class TEMDiagnostics:
             if(len(dat.dims) < 2 or len(dat.dims) > 3):
                 raise RuntimeError('Input data has {0} dims, expected either 2 ({1}, {2}) '\
                                    'or 3 ({1}, {2}, {3})'.format(len(dat.dims), self.ncolname, 
-                                                                 self.levname, self.timename))
+                                                                 self.plevname, self.timename))
             # if time doesn't exist, expand the data arrays to include a new temporal
             # dimension of length 1, value 0.
             if(self.timename not in dat.dims):
@@ -361,33 +359,33 @@ class TEMDiagnostics:
             self._logger.print('Variable q[{}] transposed: {} -> {}'.format(i, old_dims, self.q[i].dims))
          
         # ---- get coordinates, data lengths
-        self.lev  = self.ua[self.levname]  # model levels [hPa]
+        self.plev  = self.ua[self.plevname]  # model levels [hPa]
         self.time = self.ua[self.timename] # time positions [hours]
         self.NCOL = self.ua.shape[0]
         self.NLEV = self.ua.shape[1]
         self.NT   = self.ua.shape[2] 
         self._logger.print('DATA DIMENSIONS: {} x {} x {} = {} x {} x {}'.format(
-                                                   self.ncolname, self.levname, self.timename, 
+                                                   self.ncolname, self.plevname, self.timename, 
                                                    self.NCOL, self.NLEV, self.NT))
         
         # ---- ensure pressure was input as a 1D coordinate consistent with the data
-        if not (len(self.p) == self.NLEV and len(self.p.dims) == 1 and self.p.dims[0] == self.levname):
+        if not (len(self.p) == self.NLEV and len(self.p.dims) == 1 and self.p.dims[0] == self.plevname):
             raise RuntimeError('pressure p must be input as a 1D coordinate matching '\
                                'the vertical dimension of the data in length (currently {})'\
-                               'and name (currently {})'.format(self.NLEV, self.levname))
+                               'and name (currently {})'.format(self.NLEV, self.plevname))
         
         # ---- check pressure direction convention
         # ensure that pressure increases toward right-end of arrays. If not, flip
         # this axis for all data
-        if(self.lev[0] > self.lev[-1]):
-            self.ua  = self.ua.reindex({self.levname, self.lev[::-1]})
-            self.vai = self.va.reindex({self.levname, self.lev[::-1]})
-            self.ta  = self.ta.reindex({self.levname, self.lev[::-1]})
-            self.wap = self.wap.reindex({self.levname, self.lev[::-1]})
-            self.p   = self.p.reindex({self.levname, self.lev[::-1]})
+        if(self.plev[0] > self.plev[-1]):
+            self.ua  = self.ua.reindex({self.plevname, self.plev[::-1]})
+            self.vai = self.va.reindex({self.plevname, self.plev[::-1]})
+            self.ta  = self.ta.reindex({self.plevname, self.plev[::-1]})
+            self.wap = self.wap.reindex({self.plevname, self.plev[::-1]})
+            self.p   = self.p.reindex({self.plevname, self.plev[::-1]})
             for i in range(self.ntrac):
-                self.q[i] = self.q[i].reindex({self.levname, self.lev[::-1]}) 
-            self.lev = self.ua[self.levname]
+                self.q[i] = self.q[i].reindex({self.plevname, self.plev[::-1]}) 
+            self.plev = self.ua[self.plevname]
             self._logger.print('Reversed direction of vertical dimension for all data '\
                                '(such that the model top is the leftmost entry in the '\
                                'pressure data array)')
@@ -676,7 +674,7 @@ class TEMDiagnostics:
         
         # bar(ω)* = bar(ω) + 1/(a*cos(φ)) * d(ψ*cos(φ))/dφ
         # -> bar(w)* = -H/p * bar(ω)*
-        wtem = util.multiply_p(self._omegatem(), -H/self.p)
+        wtem = util.multiply_p(self.omegatem(), -H/self.p)
         wtem.name = 'wtem'
         return wtem
     
@@ -733,8 +731,8 @@ class TEMDiagnostics:
         # the functions epfy and epfz compute the log-pressure versions of the 
         # vector components, while the present calculation requires the pressure
         # versions. Cancel the conversion factors first
-        Fphi = util.multiply_p(self._epfy(), self.p0/self.p)
-        Fp   = self._epfz() * -self.p0/H
+        Fphi = util.multiply_p(self.epfy(), self.p0/self.p)
+        Fp   = self.epfz() * -self.p0/H
        
         Fphicoslat       = util.multiply_lat(Fphi, self.coslat)
         dFphicoslat_dlat = util.lat_gradient(Fphicoslat, np.deg2rad(self.lat))
@@ -752,7 +750,7 @@ class TEMDiagnostics:
         self._logger.print('computing utendepfd...')
         
         # d(bar(u))/dt|_(∇ * F) = (∇ * F) / (a*cos(φ))
-        utendepfd = util.multiply_lat(self._epdiv(), 1/(a * self.coslat))
+        utendepfd = util.multiply_lat(self.epdiv(), 1/(a * self.coslat))
         utendepfd.name = 'utendepfd'
         return utendepfd
     
@@ -766,7 +764,7 @@ class TEMDiagnostics:
         self._logger.print('computing utendvtem...')
          
         # d(bar(u))/dt|_adv(bar(v)*) = bar(v)* * (f - 1/(a*cos(φ)) * d(bar(u)cos(φ))/dφ)
-        vstar     = self._vtem()
+        vstar     = self.vtem()
         diff      = (self.f - util.multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat)))
         utendvtem = vstar * diff
         utendvtem.name = 'utendvtem'
@@ -781,7 +779,7 @@ class TEMDiagnostics:
         self._logger.print('computing utendwtem...')
 
         # d(bar(u))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(u)/dp
-        wstar     = self._omegatem()
+        wstar     = self.omegatem()
         utendwtem = -wstar * self._dub_dp
         utendwtem.name = 'utendwtem'
         return utendwtem
@@ -876,8 +874,8 @@ class TEMDiagnostics:
         # the functions etfy and etfz compute the log-pressure versions of the 
         # vector components, while the present calculation requires the pressure
         # versions. Cancel the conversion factors first
-        Mphi = util.multiply_p(self._etfy(qi), self.p0/self.p)
-        Mp   = self._etfz(qi) * -self.p0/H
+        Mphi = util.multiply_p(self.etfy(qi), self.p0/self.p)
+        Mp   = self.etfz(qi) * -self.p0/H
        
         Mphicoslat       = util.multiply_lat(Mphi, self.coslat)
         dMphicoslat_dlat = util.lat_gradient(Mphicoslat, np.deg2rad(self.lat))
@@ -906,7 +904,7 @@ class TEMDiagnostics:
              'qi must be passed to qtendetfd() when len(q) > 1!')
         
         # d(bar(q))/dt|_(∇ * M) = (∇ * M) / (a*cos(φ))
-        qtendetfd = util.multiply_lat(self._etdiv(qi), 1/(a * self.coslat))
+        qtendetfd = util.multiply_lat(self.etdiv(qi), 1/(a * self.coslat))
         qtendetfd.name = 'qtendetfd'
         return qtendetfd
  
@@ -930,10 +928,10 @@ class TEMDiagnostics:
              'qi must be passed to qtendvtem() when len(q) > 1!')
         
         if(self.q_misshapen):
-            vstar = self._vtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
+            vstar = self.vtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
             dqbcoslat_dlat = self._dqbcoslat_dlat[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
         else:
-            vstar = self._vtem()
+            vstar = self.vtem()
             dqbcoslat_dlat = self._dqbcoslat_dlat[qi]
         
         # d(bar(q))/dt|_adv(bar(v)*) = -bar(v)* * (1/(a*cos(φ)) * d(bar(q)cos(φ))/dφ)
@@ -962,14 +960,14 @@ class TEMDiagnostics:
              'qi must be passed to qtendwtem() when len(q) > 1!')
         
         if(self.q_misshapen):
-            wstar = self._wtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
+            wstar = self.wtem().groupby('time.{}'.format(self.q_tavg)).mean('time')
             dqb_dp = self._dqb_dp[qi].groupby('time.{}'.format(self.q_tavg)).mean('time')
         else:
-            wstar = self._wtem()
+            wstar = self.wtem()
             dqb_dp = self._dqb_dp[qi]
         
         # d(bar(q))/dt|_adv(bar(ω)*) = -bar(ω)* * d(bar(q)/dp
-        wstar     = self._omegatem()
+        wstar     = self.omegatem()
         qtendwtem = -wstar * dqb_dp
         qtendwtem.name = 'qtendwtem'
         return qtendwtem
