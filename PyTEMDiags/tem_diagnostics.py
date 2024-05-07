@@ -240,7 +240,7 @@ class TEMDiagnostics:
         
         # ---- construct zonal averaging obeject
         self._logger.print('Getting zonal averaging matrices...')
-        self.ZM = sph_zonal_averager(self.lat_native, self.lat_zm, self.L,  
+        self.ZM = sph_zonal_averager(self.lat_native, self._lat_zm, self.L,  
                                      grid_name=grid_name, grid_out_name=zm_grid_name, 
                                      save_dest=map_save_dest, debug=debug_level>1, 
                                      overwrite=overwrite_map)
@@ -258,9 +258,8 @@ class TEMDiagnostics:
         self._compute_fluxes()
         self._compute_derivatives()
         
-        # ---- output filename used by self.to_netcdf() and self.q_to_netcdf()
+        # ---- output filename used by self.to_netcdf()
         self._out_file = None
-        self._q_out_file = None
      
     # --------------------------------------------------
 
@@ -298,6 +297,8 @@ class TEMDiagnostics:
         else:
             self.ntrac = 0
         self._logger.print('Number of input tracers: {}'.format(self.ntrac))
+        # output filename used by self.q_to_netcdf()
+        self._q_out_file = [None]*self.ntrac
 
         # ---- gather variables for dimensions config 
         allvars    = {'ua':self.ua, 'va':self.va, 'ta':self.ta, 
@@ -391,20 +392,20 @@ class TEMDiagnostics:
         tol = 1e-6                  # tolerance for float coparisons
         assert (180/self.zm_dlat).is_integer(), '180 must be divisible by dlat_out'
         
-        self.lat_zm = np.arange(-90, 90+self.zm_dlat, self.zm_dlat)
-        if(self.lat_zm[-1] > 90+tol): self.lat_zm = self.lat_zm[:-1]
+        self._lat_zm = np.arange(-90, 90+self.zm_dlat, self.zm_dlat)
+        if(self._lat_zm[-1] > 90+tol): self._lat_zm = self._lat_zm[:-1]
         if(not self.zm_pole_points):
-            self.lat_zm = (self.lat_zm[1:] + self.lat_zm[:-1]) / 2
+            self._lat_zm = (self._lat_zm[1:] + self._lat_zm[:-1]) / 2
         
-        self.ZM_N = len(self.lat_zm)   # length of zonal mean latitude set
+        self.ZM_N = len(self._lat_zm)   # length of zonal mean latitude set
         self._logger.print('Built zonal-mean latitude grid with {} deg spacing: {}'.format(
-                                                                self.zm_dlat, self.lat_zm))
+                                                                self.zm_dlat, self._lat_zm))
         
         # --- get latitude-based quantities
-        self._f_zm      = 2*Om*np.sin(self.lat_zm * np.pi/180) # coriolis parameter on zonal mean grid
-        self._coslat_zm = np.cos(self.lat_zm * np.pi/180)      # cosine of latitude on zonal mean grid 
+        self._f_zm      = 2*Om*np.sin(self._lat_zm * np.pi/180) # coriolis parameter on zonal mean grid
+        self._coslat_zm = np.cos(self._lat_zm * np.pi/180)      # cosine of latitude on zonal mean grid 
         # shorthand for quantities used in TEM calculations
-        self.lat, self.coslat  = self.lat_zm, self._coslat_zm
+        self.lat, self.coslat  = self._lat_zm, self._coslat_zm
         self.f                 = self._f_zm[:, np.newaxis, np.newaxis]
   
     # --------------------------------------------------
@@ -482,9 +483,11 @@ class TEMDiagnostics:
             warnings.warn('\'out_file\' is not set until to_netcdf() is called')
         return self._out_file
     @property
-    def q_out_file(self): 
-        if(self._q_out_file is None):
-            warnings.warn('\'q_out_file\' is not set until to_netcdf() is called')
+    def q_out_file(self):
+        if(len(self._q_out_file) == 0):
+            warnings.warn('\'q_out_file\' is emtpy; no tracers currently present')
+        if(self._q_out_file.count(None) == self.ntrac):
+            warnings.warn('\'q_out_file\' is not set until q_to_netcdf() is called')
         return self._q_out_file
 
     # --------------------------------------------------
@@ -986,7 +989,7 @@ class TEMDiagnostics:
 
         Parameters
         ----------
-        qi : int, optiona;
+        qi : int, optional;
             Index of tracer to write out. If not povided, all tracer TEM quantities
             will be written out to separate files per-tracer
         loc : str, optional
@@ -996,6 +999,8 @@ class TEMDiagnostics:
             Defaults to false, in which case only the quantities computed by
             the class methods are written.
         '''
+
+        assert self.ntrac > 0, 'No tracers to output (argument `q` not passed at object construction)'
         
         if prefix is not None: prefix = '{}_'.format(prefix)
         else: prefix = ''
@@ -1024,12 +1029,12 @@ class TEMDiagnostics:
             filename       = '{}TEM_{}_{}_L{}_poles{}_attrs{}_TRACER-{}.nc'.format(prefix,
                              self.ZM.grid_name, self.ZM.grid_out_name, self.L, 
                              self.zm_pole_points, include_attrs, tracer_names[i])
-            self._q_out_file = '{}/{}'.format(loc, filename)
+            self._q_out_file[i] = '{}/{}'.format(loc, filename)
 
             dataset = xr.Dataset(output)
-            dataset.to_netcdf(self._q_out_file)
+            dataset.to_netcdf(self._q_out_file[i])
             self._logger.print('wrote {} tracer TEM data to {}'.format(tracer_names[i], self._out_file))
-            return self._q_out_file
+        return self._q_out_file
         
 
 # =========================================================================
