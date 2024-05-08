@@ -968,9 +968,11 @@ class TEMDiagnostics:
         if prefix is not None: prefix = '{}_'.format(prefix)
         else: prefix = ''
         
-        filename       = '{}TEM_{}_{}_L{}_poles{}_attrs{}.nc'.format(prefix,
-                         self.ZM.grid_name, self.ZM.grid_out_name, self.L, 
-                         self.zm_pole_points, include_attrs)
+        filename       = '{}TEM_{}_{}_L{}.nc'.format(prefix,
+                         self.ZM.grid_name, self.ZM.grid_out_name, self.L)
+        #filename       = '{}TEM_{}_{}_L{}_poles{}_attrs{}.nc'.format(prefix,
+        #                 self.ZM.grid_name, self.ZM.grid_out_name, self.L, 
+        #                 self.zm_pole_points, include_attrs)
         self._out_file = '{}/{}'.format(loc, filename)
 
         dataset = xr.Dataset(output)
@@ -1026,14 +1028,18 @@ class TEMDiagnostics:
             else:
                 output = results
  
-            filename       = '{}TEM_{}_{}_L{}_poles{}_attrs{}_TRACER-{}.nc'.format(prefix,
+            filename       = '{}TEM_{}_{}_L{}_TRACER-{}.nc'.format(prefix,
                              self.ZM.grid_name, self.ZM.grid_out_name, self.L, 
-                             self.zm_pole_points, include_attrs, tracer_names[i])
+                             tracer_names[i])
+            #filename       = '{}TEM_{}_{}_L{}_poles{}_attrs{}_TRACER-{}.nc'.format(prefix,
+            #                 self.ZM.grid_name, self.ZM.grid_out_name, self.L, 
+            #                 self.zm_pole_points, include_attrs, tracer_names[i])
             self._q_out_file[i] = '{}/{}'.format(loc, filename)
 
             dataset = xr.Dataset(output)
             dataset.to_netcdf(self._q_out_file[i])
-            self._logger.print('wrote {} tracer TEM data to {}'.format(tracer_names[i], self._out_file))
+            self._logger.print('wrote {} tracer TEM data to {}'.format(
+                                       tracer_names[i], self._q_out_file[i]))
         return self._q_out_file
         
 
