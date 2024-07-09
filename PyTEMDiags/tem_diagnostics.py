@@ -625,6 +625,10 @@ class TEMDiagnostics:
         # bar(v)* = bar(v) - dψ/dp
         vtem = self._vb - self._dpsi_dp
         vtem.name = 'vtem'
+
+        # match data type to type of input data
+        vtem = vtem.astype(self.va.dtype)
+
         return vtem
     
     # --------------------------------------------------
@@ -638,6 +642,10 @@ class TEMDiagnostics:
         # bar(ω)* = bar(ω) + 1/(a*cos(φ)) * d(ψ*cos(φ))/dφ
         omegatem = self._wapb + util.multiply_lat(self._dpsicoslat_dlat, 1/(a*self.coslat))
         omegatem.name = 'omegatem'
+        
+        # match data type to type of input data
+        omegatem = omegatem.astype(self.wap.dtype)
+        
         return omegatem
     
     # --------------------------------------------------
@@ -652,6 +660,10 @@ class TEMDiagnostics:
         # -> bar(w)* = -H/p * bar(ω)*
         wtem = util.multiply_p(self.omegatem(), -H/self.p)
         wtem.name = 'wtem'
+        
+        # match data type to type of input data
+        wtem = wtem.astype(self.wap.dtype)
+        
         return wtem
     
     # --------------------------------------------------
@@ -665,6 +677,10 @@ class TEMDiagnostics:
         # Ψ(p) = 2π*a*cos(φ)/g * (int_p^0[bar(v)dp] - ψ)
         psitem = 2*pi*a/g0 * util.multiply_lat(self._int_vbdp - self._psi, self.coslat)
         psitem.name = 'psitem'
+        
+        # match data type to type of input data
+        psitem = psitem.astype(self.va.dtype)
+        
         return psitem
     
     # --------------------------------------------------
@@ -679,6 +695,10 @@ class TEMDiagnostics:
         x    = util.multiply_lat(self._dub_dp * self._psi - self._upvpb, a*self.coslat)
         epfy = util.multiply_p(x, self.p/self.p0)
         epfy.name = 'epfy'
+        
+        # match data type to type of input data
+        epfy = epfy.astype(self.ua.dtype)
+        
         return epfy
     
     # --------------------------------------------------
@@ -693,6 +713,10 @@ class TEMDiagnostics:
         x    = self.f - util.multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat))
         epfz = -H/self.p0 * util.multiply_lat((x*self._psi - self._upwappb), a*self.coslat)
         epfz.name = 'epfz'
+        
+        # match data type to type of input data
+        epfz = epfz.astype(self.ua.dtype)
+        
         return epfz
     
     # --------------------------------------------------
@@ -715,6 +739,10 @@ class TEMDiagnostics:
         dFp_dp           = util.p_gradient(Fp, self.p)
         epdiv            = util.multiply_lat(dFphicoslat_dlat, 1/(a*self.coslat)) + dFp_dp
         epdiv.name = 'epdiv' 
+        
+        # match data type to type of input data
+        epdiv = epdiv.astype(self.ua.dtype)
+        
         return epdiv
   
     # --------------------------------------------------
@@ -728,6 +756,10 @@ class TEMDiagnostics:
         # d(bar(u))/dt|_(∇ * F) = (∇ * F) / (a*cos(φ))
         utendepfd = util.multiply_lat(self.epdiv(), 1/(a * self.coslat))
         utendepfd.name = 'utendepfd'
+        
+        # match data type to type of input data
+        utendepfd = utendepfd.astype(self.ua.dtype)
+        
         return utendepfd
     
     # --------------------------------------------------
@@ -744,6 +776,10 @@ class TEMDiagnostics:
         diff      = (self.f - util.multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat)))
         utendvtem = vstar * diff
         utendvtem.name = 'utendvtem'
+        
+        # match data type to type of input data
+        utendvtem = utendvtem.astype(self.ua.dtype)
+        
         return utendvtem
     
     # --------------------------------------------------
@@ -758,6 +794,10 @@ class TEMDiagnostics:
         wstar     = self.omegatem()
         utendwtem = -wstar * self._dub_dp
         utendwtem.name = 'utendwtem'
+        
+        # match data type to type of input data
+        utendwtem = utendwtem.astype(self.ua.dtype)
+        
         return utendwtem
 
     # --------------------------------------------------
@@ -787,6 +827,10 @@ class TEMDiagnostics:
         x    = util.multiply_lat(dqb_dp * psi - qpvpb, a*self.coslat)
         etfy = util.multiply_p(x, self.p/self.p0)
         etfy.name = 'etfy'
+        
+        # match data type to type of input data
+        etfy = etfy.astype(self.q[qi].dtype)
+        
         return etfy
     
     # --------------------------------------------------
@@ -816,6 +860,10 @@ class TEMDiagnostics:
         x    = -util.multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
         etfz = -H/self.p0 * util.multiply_lat((x*psi - qpwappb), a*self.coslat)
         etfz.name = 'etfz'
+        
+        # match data type to type of input data
+        etfz = etfz.astype(self.q[qi].dtype)
+        
         return etfz
     
     # --------------------------------------------------
@@ -848,6 +896,10 @@ class TEMDiagnostics:
         dMp_dp           = util.p_gradient(Mp, self.p)
         etdiv            = util.multiply_lat(dMphicoslat_dlat, 1/(a*self.coslat)) + dMp_dp
         etdiv.name = 'etdiv' 
+        
+        # match data type to type of input data
+        etdiv = etdiv.astype(self.q[qi].dtype)
+        
         return etdiv
   
     # --------------------------------------------------
@@ -872,6 +924,10 @@ class TEMDiagnostics:
         # d(bar(q))/dt|_(∇ * M) = (∇ * M) / (a*cos(φ))
         qtendetfd = util.multiply_lat(self.etdiv(qi), 1/(a * self.coslat))
         qtendetfd.name = 'qtendetfd'
+        
+        # match data type to type of input data
+        qtendetfd = qtendetfd.astype(self.q[qi].dtype)
+        
         return qtendetfd
  
     # --------------------------------------------------
@@ -900,6 +956,10 @@ class TEMDiagnostics:
         diff      = util.multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
         qtendvtem = -vstar * diff
         qtendvtem.name = 'qtendvtem'
+        
+        # match data type to type of input data
+        qtendvtem = qtendvtem.astype(self.q[qi].dtype)
+        
         return qtendvtem
     
     # --------------------------------------------------
@@ -928,6 +988,10 @@ class TEMDiagnostics:
         wstar     = self.omegatem()
         qtendwtem = -wstar * dqb_dp
         qtendwtem.name = 'qtendwtem'
+        
+        # match data type to type of input data
+        qtendwtem = qtendwtem.astype(self.q[qi].dtype)
+        
         return qtendwtem
 
     # --------------------------------------------------
