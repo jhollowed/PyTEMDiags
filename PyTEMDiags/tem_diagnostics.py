@@ -234,8 +234,6 @@ class TEMDiagnostics:
         self.map_save_dest  = map_save_dest
         self.overwrite_map  = overwrite_map
         self.debug_level    = debug_level
-
-        self.nozflip = nozflip # tmp debug
           
         # ---- veryify input data dimensions, configure data and settings
         self._config_dims()
