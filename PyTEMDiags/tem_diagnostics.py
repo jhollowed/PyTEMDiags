@@ -32,7 +32,7 @@ class TEMDiagnostics:
     def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, 
                  zm_dlat=1, L=150, dim_names=DEFAULT_DIMS, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
-                 overwrite_map=False, zm_pole_points=False, debug_level=0):
+                 overwrite_map=False, zm_pole_points=False, debug_level=1):
         '''
         This class provides interfaces for computing TEM diagnostic quantities on a pressure 
         vertical coordinate. Upon initialization, the input data is checked and reshaped as 
@@ -234,6 +234,8 @@ class TEMDiagnostics:
         self.map_save_dest  = map_save_dest
         self.overwrite_map  = overwrite_map
         self.debug_level    = debug_level
+
+        self.nozflip = nozflip # tmp debug
           
         # ---- veryify input data dimensions, configure data and settings
         self._config_dims()
@@ -376,13 +378,13 @@ class TEMDiagnostics:
         # ensure that pressure increases toward right-end of arrays. If not, flip
         # this axis for all data
         if(self.plev[0] > self.plev[-1]):
-            self.ua  = self.ua.reindex({self.plevname, self.plev[::-1]})
-            self.vai = self.va.reindex({self.plevname, self.plev[::-1]})
-            self.ta  = self.ta.reindex({self.plevname, self.plev[::-1]})
-            self.wap = self.wap.reindex({self.plevname, self.plev[::-1]})
-            self.p   = self.p.reindex({self.plevname, self.plev[::-1]})
+            self.ua  = self.ua.reindex({self.plevname:self.plev[::-1]})
+            self.va = self.va.reindex({self.plevname:self.plev[::-1]})
+            self.ta  = self.ta.reindex({self.plevname:self.plev[::-1]})
+            self.wap = self.wap.reindex({self.plevname:self.plev[::-1]})
+            self.p   = self.p.reindex({self.plevname:self.plev[::-1]})
             for i in range(self.ntrac):
-                self.q[i] = self.q[i].reindex({self.plevname, self.plev[::-1]}) 
+                self.q[i] = self.q[i].reindex({self.plevname:self.plev[::-1]}) 
             self.plev = self.ua[self.plevname]
             self._logger.print('Reversed direction of vertical dimension for all data '\
                                '(such that the model top is the leftmost entry in the '\
