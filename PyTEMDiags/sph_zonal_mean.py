@@ -212,7 +212,10 @@ class sph_zonal_averager:
                                'grid_name_out, and save_dest, or call sph_compute_matrices()'\
                                'before sph_zonal_mean() or sph_zonal_mean_native()!')
         if(not isinstance(A, xr.core.dataarray.DataArray)):
-            raise RuntimeError('Variable A must be an xarray DataArray!')
+            raise RuntimeError('Variable {} must be an xarray DataArray!'.format(A.name))
+        if(np.sum(np.isnan(A)) > 0):
+            raise RuntimeError('Variable {} has nans! Spectral zonal averager cannot handle nans; '\
+                               'please replace or remove them'.format(A.name))
 
         # ---- A will have been passed by reference; 
         #      make copy of the data object for modification

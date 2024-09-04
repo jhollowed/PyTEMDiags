@@ -29,8 +29,8 @@ DEFAULT_DIMS = {'horz':'ncol', 'vert':'plev', 'time':'time'}
 
 
 class TEMDiagnostics:
-    def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, 
-                 zm_dlat=1, L=150, dim_names=DEFAULT_DIMS, 
+    def __init__(self, ua, va, ta, wap, lat_native, q=None, p0=P0, 
+                 zm_dlat=1, L=50, dim_names=DEFAULT_DIMS, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
                  overwrite_map=False, zm_pole_points=False, debug_level=1):
         '''
@@ -49,7 +49,7 @@ class TEMDiagnostics:
             (unstructured spatially 3D), with optional third temporal dimension. The 
             horizontal, vertical, and optional temporal dimensions must be named, with names
             matching those given by the argument 'dim_names'. The expected units of the 
-            coordinates are: ncol dimensionless, lev in hPa, time in hours. For an accurate
+            coordinates are: ncol dimensionless, plev in hPa, time in hours. For an accurate
             computation, all variables should be provided on temporal resolution equal to
             or better than daily.
         va : xarray DataArray
@@ -58,9 +58,6 @@ class TEMDiagnostics:
             Air temperature, in K.
         wap : xarray DataArray
             Vertical pressure velocity, in Pa/s.
-        p : xarray DataArray
-            Air pressure, in Pa as a 1D array, matching the length of the data variables in 
-            the vertical dimension
         lat_native : xarray DataArray
             Latitudes in degrees.
         q : xarray DataArray, or list of xarray DataArray
@@ -215,7 +212,6 @@ class TEMDiagnostics:
          
         # ---- get input args
         # variables
-        self.p     = p    # pressure [Pa]
         self.ua    = ua   # eastward wind [m/s]
         self.va    = va   # northward wind [m/s]
         self.ta    = ta   # temperature [K]
@@ -234,7 +230,7 @@ class TEMDiagnostics:
         self.map_save_dest  = map_save_dest
         self.overwrite_map  = overwrite_map
         self.debug_level    = debug_level
-          
+         
         # ---- veryify input data dimensions, configure data and settings
         self._config_dims()
         
@@ -366,12 +362,6 @@ class TEMDiagnostics:
                                                    self.ncolname, self.plevname, self.timename, 
                                                    self.NCOL, self.NLEV, self.NT))
         
-        # ---- ensure pressure was input as a 1D coordinate consistent with the data
-        if not (len(self.p) == self.NLEV and len(self.p.dims) == 1 and self.p.dims[0] == self.plevname):
-            raise RuntimeError('pressure p must be input as a 1D coordinate matching '\
-                               'the vertical dimension of the data in length (currently {})'\
-                               'and name (currently {})'.format(self.NLEV, self.plevname))
-        
         # ---- check pressure direction convention
         # ensure that pressure increases toward right-end of arrays. If not, flip
         # this axis for all data
@@ -380,13 +370,15 @@ class TEMDiagnostics:
             self.va = self.va.reindex({self.plevname:self.plev[::-1]})
             self.ta  = self.ta.reindex({self.plevname:self.plev[::-1]})
             self.wap = self.wap.reindex({self.plevname:self.plev[::-1]})
-            self.p   = self.p.reindex({self.plevname:self.plev[::-1]})
             for i in range(self.ntrac):
                 self.q[i] = self.q[i].reindex({self.plevname:self.plev[::-1]}) 
             self.plev = self.ua[self.plevname]
             self._logger.print('Reversed direction of vertical dimension for all data '\
                                '(such that the model top is the leftmost entry in the '\
                                'pressure data array)')
+
+        # ---- store pressure in Pa
+        self.p = self.plev * 100
         
         # ---- build uniform latitude discretization lat_zm for zonal mean remap
         tol = 1e-6                  # tolerance for float coparisons
