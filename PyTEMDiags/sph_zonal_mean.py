@@ -212,9 +212,12 @@ class sph_zonal_averager:
                                'grid_name_out, and save_dest, or call sph_compute_matrices()'\
                                'before sph_zonal_mean() or sph_zonal_mean_native()!')
         if(not isinstance(A, xr.core.dataarray.DataArray)):
-            raise RuntimeError('Variable A must be an xarray DataArray!')
+            raise RuntimeError('Variable {} must be an xarray DataArray!'.format(A.name))
+        if(np.sum(np.isnan(A)) > 0):
+            raise RuntimeError('Variable {} has nans! Spectral zonal averager cannot handle nans; '\
+                               'please replace or remove them'.format(A.name))
 
-        # ---- A will have been passed by refernce; 
+        # ---- A will have been passed by reference; 
         #      make copy of the data object for modification
         A = A.copy(deep=True)
         
@@ -229,6 +232,9 @@ class sph_zonal_averager:
             raise RuntimeError('(sph_zonal_mean_generic() Expected the first (leftmost) '\
                                'dimension of variable {} to be {} of length {}'.format(
                                                           A.name, self.ncoldim, self.N))
+
+        # ---- get precision of input data
+        prec_A = A.dtype
 
         # ---- extract and reshape data for averaging
         AA = A.values
@@ -264,6 +270,13 @@ class sph_zonal_averager:
                               'ncol={} -> ncol={}'.format(A.name, self.N, self.M))
         A.values = Abar
         A.attrs['long_name'] = 'zonal mean of {}'.format(A.name)
+
+        # ---- cast the data type of the zonal mean to that of the input data
+        # since the matrices Y are stored as 64-bit floats, the matrix multiplication
+        # step above will result in a 64-bit type for Abar. If this differs from the
+        # type of the input data (e.g. float32), then cast the type of the result to 
+        # match the input data
+        A = A.astype(prec_A) 
         return A 
          
     def sph_zonal_mean_native(self, A):

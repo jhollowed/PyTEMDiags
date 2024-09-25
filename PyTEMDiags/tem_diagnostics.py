@@ -29,10 +29,10 @@ DEFAULT_DIMS = {'horz':'ncol', 'vert':'plev', 'time':'time'}
 
 
 class TEMDiagnostics:
-    def __init__(self, ua, va, ta, wap, p, lat_native, q=None, p0=P0, 
-                 zm_dlat=1, L=150, dim_names=DEFAULT_DIMS, 
+    def __init__(self, ua, va, ta, wap, lat_native, q=None, p0=P0, 
+                 zm_dlat=1, L=50, dim_names=DEFAULT_DIMS, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
-                 overwrite_map=False, zm_pole_points=False, debug_level=0):
+                 overwrite_map=False, zm_pole_points=False, debug_level=1):
         '''
         This class provides interfaces for computing TEM diagnostic quantities on a pressure 
         vertical coordinate. Upon initialization, the input data is checked and reshaped as 
@@ -49,7 +49,7 @@ class TEMDiagnostics:
             (unstructured spatially 3D), with optional third temporal dimension. The 
             horizontal, vertical, and optional temporal dimensions must be named, with names
             matching those given by the argument 'dim_names'. The expected units of the 
-            coordinates are: ncol dimensionless, lev in hPa, time in hours. For an accurate
+            coordinates are: ncol dimensionless, plev in hPa, time in hours. For an accurate
             computation, all variables should be provided on temporal resolution equal to
             or better than daily.
         va : xarray DataArray
@@ -58,9 +58,6 @@ class TEMDiagnostics:
             Air temperature, in K.
         wap : xarray DataArray
             Vertical pressure velocity, in Pa/s.
-        p : xarray DataArray
-            Air pressure, in Pa as a 1D array, matching the length of the data variables in 
-            the vertical dimension
         lat_native : xarray DataArray
             Latitudes in degrees.
         q : xarray DataArray, or list of xarray DataArray
@@ -215,7 +212,6 @@ class TEMDiagnostics:
          
         # ---- get input args
         # variables
-        self.p     = p    # pressure [Pa]
         self.ua    = ua   # eastward wind [m/s]
         self.va    = va   # northward wind [m/s]
         self.ta    = ta   # temperature [K]
@@ -234,7 +230,7 @@ class TEMDiagnostics:
         self.map_save_dest  = map_save_dest
         self.overwrite_map  = overwrite_map
         self.debug_level    = debug_level
-          
+         
         # ---- veryify input data dimensions, configure data and settings
         self._config_dims()
         
@@ -366,27 +362,23 @@ class TEMDiagnostics:
                                                    self.ncolname, self.plevname, self.timename, 
                                                    self.NCOL, self.NLEV, self.NT))
         
-        # ---- ensure pressure was input as a 1D coordinate consistent with the data
-        if not (len(self.p) == self.NLEV and len(self.p.dims) == 1 and self.p.dims[0] == self.plevname):
-            raise RuntimeError('pressure p must be input as a 1D coordinate matching '\
-                               'the vertical dimension of the data in length (currently {})'\
-                               'and name (currently {})'.format(self.NLEV, self.plevname))
-        
         # ---- check pressure direction convention
         # ensure that pressure increases toward right-end of arrays. If not, flip
         # this axis for all data
         if(self.plev[0] > self.plev[-1]):
-            self.ua  = self.ua.reindex({self.plevname, self.plev[::-1]})
-            self.vai = self.va.reindex({self.plevname, self.plev[::-1]})
-            self.ta  = self.ta.reindex({self.plevname, self.plev[::-1]})
-            self.wap = self.wap.reindex({self.plevname, self.plev[::-1]})
-            self.p   = self.p.reindex({self.plevname, self.plev[::-1]})
+            self.ua  = self.ua.reindex({self.plevname:self.plev[::-1]})
+            self.va = self.va.reindex({self.plevname:self.plev[::-1]})
+            self.ta  = self.ta.reindex({self.plevname:self.plev[::-1]})
+            self.wap = self.wap.reindex({self.plevname:self.plev[::-1]})
             for i in range(self.ntrac):
-                self.q[i] = self.q[i].reindex({self.plevname, self.plev[::-1]}) 
+                self.q[i] = self.q[i].reindex({self.plevname:self.plev[::-1]}) 
             self.plev = self.ua[self.plevname]
             self._logger.print('Reversed direction of vertical dimension for all data '\
                                '(such that the model top is the leftmost entry in the '\
                                'pressure data array)')
+
+        # ---- store pressure in Pa
+        self.p = self.plev * 100
         
         # ---- build uniform latitude discretization lat_zm for zonal mean remap
         tol = 1e-6                  # tolerance for float coparisons
@@ -625,6 +617,10 @@ class TEMDiagnostics:
         # bar(v)* = bar(v) - dψ/dp
         vtem = self._vb - self._dpsi_dp
         vtem.name = 'vtem'
+
+        # match data type to type of input data
+        vtem = vtem.astype(self.va.dtype)
+
         return vtem
     
     # --------------------------------------------------
@@ -638,6 +634,10 @@ class TEMDiagnostics:
         # bar(ω)* = bar(ω) + 1/(a*cos(φ)) * d(ψ*cos(φ))/dφ
         omegatem = self._wapb + util.multiply_lat(self._dpsicoslat_dlat, 1/(a*self.coslat))
         omegatem.name = 'omegatem'
+        
+        # match data type to type of input data
+        omegatem = omegatem.astype(self.wap.dtype)
+        
         return omegatem
     
     # --------------------------------------------------
@@ -652,6 +652,10 @@ class TEMDiagnostics:
         # -> bar(w)* = -H/p * bar(ω)*
         wtem = util.multiply_p(self.omegatem(), -H/self.p)
         wtem.name = 'wtem'
+        
+        # match data type to type of input data
+        wtem = wtem.astype(self.wap.dtype)
+        
         return wtem
     
     # --------------------------------------------------
@@ -665,6 +669,10 @@ class TEMDiagnostics:
         # Ψ(p) = 2π*a*cos(φ)/g * (int_p^0[bar(v)dp] - ψ)
         psitem = 2*pi*a/g0 * util.multiply_lat(self._int_vbdp - self._psi, self.coslat)
         psitem.name = 'psitem'
+        
+        # match data type to type of input data
+        psitem = psitem.astype(self.va.dtype)
+        
         return psitem
     
     # --------------------------------------------------
@@ -679,6 +687,10 @@ class TEMDiagnostics:
         x    = util.multiply_lat(self._dub_dp * self._psi - self._upvpb, a*self.coslat)
         epfy = util.multiply_p(x, self.p/self.p0)
         epfy.name = 'epfy'
+        
+        # match data type to type of input data
+        epfy = epfy.astype(self.ua.dtype)
+        
         return epfy
     
     # --------------------------------------------------
@@ -693,6 +705,10 @@ class TEMDiagnostics:
         x    = self.f - util.multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat))
         epfz = -H/self.p0 * util.multiply_lat((x*self._psi - self._upwappb), a*self.coslat)
         epfz.name = 'epfz'
+        
+        # match data type to type of input data
+        epfz = epfz.astype(self.ua.dtype)
+        
         return epfz
     
     # --------------------------------------------------
@@ -715,6 +731,10 @@ class TEMDiagnostics:
         dFp_dp           = util.p_gradient(Fp, self.p)
         epdiv            = util.multiply_lat(dFphicoslat_dlat, 1/(a*self.coslat)) + dFp_dp
         epdiv.name = 'epdiv' 
+        
+        # match data type to type of input data
+        epdiv = epdiv.astype(self.ua.dtype)
+        
         return epdiv
   
     # --------------------------------------------------
@@ -728,6 +748,10 @@ class TEMDiagnostics:
         # d(bar(u))/dt|_(∇ * F) = (∇ * F) / (a*cos(φ))
         utendepfd = util.multiply_lat(self.epdiv(), 1/(a * self.coslat))
         utendepfd.name = 'utendepfd'
+        
+        # match data type to type of input data
+        utendepfd = utendepfd.astype(self.ua.dtype)
+        
         return utendepfd
     
     # --------------------------------------------------
@@ -744,6 +768,10 @@ class TEMDiagnostics:
         diff      = (self.f - util.multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat)))
         utendvtem = vstar * diff
         utendvtem.name = 'utendvtem'
+        
+        # match data type to type of input data
+        utendvtem = utendvtem.astype(self.ua.dtype)
+        
         return utendvtem
     
     # --------------------------------------------------
@@ -758,6 +786,10 @@ class TEMDiagnostics:
         wstar     = self.omegatem()
         utendwtem = -wstar * self._dub_dp
         utendwtem.name = 'utendwtem'
+        
+        # match data type to type of input data
+        utendwtem = utendwtem.astype(self.ua.dtype)
+        
         return utendwtem
 
     # --------------------------------------------------
@@ -787,6 +819,10 @@ class TEMDiagnostics:
         x    = util.multiply_lat(dqb_dp * psi - qpvpb, a*self.coslat)
         etfy = util.multiply_p(x, self.p/self.p0)
         etfy.name = 'etfy'
+        
+        # match data type to type of input data
+        etfy = etfy.astype(self.q[qi].dtype)
+        
         return etfy
     
     # --------------------------------------------------
@@ -816,6 +852,10 @@ class TEMDiagnostics:
         x    = -util.multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
         etfz = -H/self.p0 * util.multiply_lat((x*psi - qpwappb), a*self.coslat)
         etfz.name = 'etfz'
+        
+        # match data type to type of input data
+        etfz = etfz.astype(self.q[qi].dtype)
+        
         return etfz
     
     # --------------------------------------------------
@@ -848,6 +888,10 @@ class TEMDiagnostics:
         dMp_dp           = util.p_gradient(Mp, self.p)
         etdiv            = util.multiply_lat(dMphicoslat_dlat, 1/(a*self.coslat)) + dMp_dp
         etdiv.name = 'etdiv' 
+        
+        # match data type to type of input data
+        etdiv = etdiv.astype(self.q[qi].dtype)
+        
         return etdiv
   
     # --------------------------------------------------
@@ -872,6 +916,10 @@ class TEMDiagnostics:
         # d(bar(q))/dt|_(∇ * M) = (∇ * M) / (a*cos(φ))
         qtendetfd = util.multiply_lat(self.etdiv(qi), 1/(a * self.coslat))
         qtendetfd.name = 'qtendetfd'
+        
+        # match data type to type of input data
+        qtendetfd = qtendetfd.astype(self.q[qi].dtype)
+        
         return qtendetfd
  
     # --------------------------------------------------
@@ -900,6 +948,10 @@ class TEMDiagnostics:
         diff      = util.multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
         qtendvtem = -vstar * diff
         qtendvtem.name = 'qtendvtem'
+        
+        # match data type to type of input data
+        qtendvtem = qtendvtem.astype(self.q[qi].dtype)
+        
         return qtendvtem
     
     # --------------------------------------------------
@@ -928,6 +980,10 @@ class TEMDiagnostics:
         wstar     = self.omegatem()
         qtendwtem = -wstar * dqb_dp
         qtendwtem.name = 'qtendwtem'
+        
+        # match data type to type of input data
+        qtendwtem = qtendwtem.astype(self.q[qi].dtype)
+        
         return qtendwtem
 
     # --------------------------------------------------
