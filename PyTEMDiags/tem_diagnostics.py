@@ -116,7 +116,7 @@ class TEMDiagnostics:
         epfz()
             Returns the upward component of the EP flux in m3/s2.
         epdiv()
-            Returns the EP flux divergence.
+            Returns the EP flux divergence in m2/s2.
         utendepfd()
             Returns the tendency of eastward wind due to EP flux divergence in m/s2.
         utendvtem()
@@ -699,7 +699,7 @@ class TEMDiagnostics:
 
     def epdiv(self):
         '''
-        Returns the EP flux divergence.
+        Returns the EP flux divergence in m2/s2
         '''
         self._logger.print('computing epdiv...')
         
