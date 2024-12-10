@@ -16,19 +16,30 @@ from timeit import default_timer
 
 # -------------------------------------------------------------------------
 
+def print_to_log(s, logfile, mode):
+    with open(logfile, mode) as log:
+        log.write(s+'\n')
 
 class logger:
     '''
     Logger object used for controlling runtime output statements
     '''
-    def __init__(self, debug, name='PyTEMDiags', header=False):
+    def __init__(self, debug, name='PyTEMDiags', header=False, logfile=None, mode='a'):
         self.debug = debug
         self.name  = name
         self.timer_running = False
+        self.logfile = logfile
+        self.mode = mode
+        # redirect printing to logfile if provided
+        if(logfile is not None):
+            self.printer = lambda s, end: print_to_log(s, self.logfile, self.mode)
+        else:
+            self.printer = lambda s, end: print(s, end=end)
+        # print header
         if(debug and header): 
-            print('\n-------- {} Debug logging active ---------'.format(name))
+            self.printer('\n-------- {} Debug logging active ---------'.format(name), end=None)
     def print(self, s, with_timer=False, end=None):
-        if(self.debug): print('({} debug) {}'.format(self.name, s), end=end)
+        if(self.debug): self.printer('({} debug) {}'.format(self.name, s), end=end)
         if(with_timer):
             self.timer()
     def timer(self, start_silent=True):

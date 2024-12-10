@@ -34,7 +34,7 @@ NCENC = {'_FillValue':None}
 
 class sph_zonal_averager:
     def __init__(self, lat, lat_out, L, weights=None, grid_name=None, grid_out_name=None, 
-                 ncoldim='ncol', overwrite=False, save_dest=None, debug=False):
+                 ncoldim='ncol', overwrite=False, save_dest=None, debug=False, logfile=None):
         '''
         This class provides an interface for taking zonal averages of fields provided
         on unstructured datasets on the globe using a spherical harmonic decomposition 
@@ -97,6 +97,9 @@ class sph_zonal_averager:
             reccomended to supply this argument.
         debug : bool, optional
             Whether or not to print progress statements to stdout.
+        logfile : str, optional
+            If true, redirect stdout to a log file at location logfile.
+            Defaults to None, in which case output is not redirected.
 
         Public Methods
         --------------
@@ -129,7 +132,7 @@ class sph_zonal_averager:
             NetCDF file location for writing/reading matrix Y0p.
         '''
         
-        self.logger = logger(debug, 'sph_zonal_mean')
+        self.logger = logger(debug, 'sph_zonal_mean', logfile=logfile)
 
         # ---- arguments
         self.L = L                         # max. spherical harmonic order  

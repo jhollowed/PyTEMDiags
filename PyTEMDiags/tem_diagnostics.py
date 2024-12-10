@@ -32,7 +32,8 @@ class TEMDiagnostics:
     def __init__(self, ua, va, ta, wap, lat_native, q=None, p0=P0, 
                  zm_dlat=1, L=50, dim_names=DEFAULT_DIMS, 
                  grid_name=None, zm_grid_name=None, map_save_dest=None, 
-                 overwrite_map=False, zm_pole_points=False, debug_level=1):
+                 overwrite_map=False, zm_pole_points=False, debug_level=1, 
+                 logfile=None):
         '''
         This class provides interfaces for computing TEM diagnostic quantities on a pressure 
         vertical coordinate. Upon initialization, the input data is checked and reshaped as 
@@ -99,6 +100,9 @@ class TEMDiagnostics:
             0 = print no debug statements (defualt)
             1 = print debug statements from PyTEMDiags
             2 = print debug statements from PyTEMDiags and sph_zonal_mean
+        logfile : str, optional
+            If true, redirect stdout to a log file at location logfile.
+            Defaults to None, in which case output is not redirected.
         
         Public Methods
         --------------
@@ -208,7 +212,7 @@ class TEMDiagnostics:
             Simple string that contains metadata about the current TEM option configuration.
         '''
 
-        self._logger = util.logger(debug_level>0, header=True)
+        self._logger = util.logger(debug_level>0, header=True, logfile=logfile)
          
         # ---- get input args
         # variables
