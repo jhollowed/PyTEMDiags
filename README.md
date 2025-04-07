@@ -52,9 +52,3 @@ Note that there are a few assumptions made of the input data variables:
 
 For the assumed units of the input variables and more descriptions, see the docstrings at the top of the `TEMDiagnostics` source code.
 
-### Testing
-
-<div id="io"></div>
-
-## Inputs, Outputs
-
