@@ -58,7 +58,7 @@ class sph_zonal_averager:
         lat_out : 1D array
             Output latitudes, in degrees.
         L : int
-            Maximum spherical harmonic order.
+            Maximum spherical harmonic degree.
         weights : 1D array or string, optional
             Unstructured vector of N grid area weights for the grid positions lat. These 
             weights must sum to one (each weight is a fractional surface area of the unit 
@@ -135,7 +135,7 @@ class sph_zonal_averager:
         self.logger = logger(debug, 'sph_zonal_mean', logfile=logfile)
 
         # ---- arguments
-        self.L = L                         # max. spherical harmonic order  
+        self.L = L                         # max. spherical harmonic degree  
         self.lat = lat                     # input latitudes [deg]
         self.lat_out = lat_out             # output latitudes [deg]
         self.weights = weights             # grid area weights
