@@ -20,6 +20,7 @@ import xarray as xr
 from . import tem_util as util
 from .constants import *
 from .sph_zonal_mean import *
+from . import wave_spectrum as spec
 
 # ---- global constants
 DEFAULT_DIMS = {'horz':'ncol', 'vert':'lev', 'time':'time'}
@@ -148,6 +149,18 @@ class TEMDiagnostics:
             and coriolis in 1/s.
         qtendwtem()
             Returns the tendency of tracer mixing ratios due to TEM upward wind advection in 1/s.
+        epfy_trans()
+            Returns the northward component of the EP flux in m3/s2 in spectral 
+            (wavenumber, frequency) space
+        epfz_trans()
+            Returns the upward component of the EP flux in m3/s2 in spectral 
+            (wavenumber, frequency) space
+        etfy_trans()
+            Returns the northward component of the eddy tracer flux in m2/s in spectral 
+            (wavenumber, frequency) space
+        etfz_trans()
+            Returns the upward component of the eddy tracer flux in m2/s in spectral 
+            (wavenumber, frequency) space
         
         Public Attributes
         -----------------
@@ -272,6 +285,11 @@ class TEMDiagnostics:
         # ---- compute fluxes, vertical and meridional derivaties, streamfunction terms
         self._compute_fluxes()
         self._compute_derivatives()
+
+        # ---- compute flux and zonal mean spectral transforms if requested
+        if(do_spectral_analysis):
+            self._compute_transform_zm()
+            self._comput_transform_fluxes()
         
         # ---- output filename used by self.to_netcdf()
         self._out_file = None
@@ -584,6 +602,12 @@ class TEMDiagnostics:
     @property
     def psi(self): return self._zm_return_func(self._psi)
     @property
+    def out_file(self): 
+        if(self._out_file is None):
+            warnings.warn('\'out_file\' is not set until to_netcdf() is called')
+        return self._out_file
+    # ------ tracer quantities
+    @property
     def dpsi_dp(self): return self._zm_return_func(self._dpsi_dp)
     @property
     def qp(self): return self._qp
@@ -603,11 +627,13 @@ class TEMDiagnostics:
     def qbcoslat(self): return [self._zm_return_func(qi) for qi in self._qbcoslat]
     @property
     def dqbcoslat_dlat(self): return [self._zm_return_func(qi) for qi in self._dqbcoslat_dlat]
+    # ------ spectral transform quantities
     @property
-    def out_file(self): 
-        if(self._out_file is None):
-            warnings.warn('\'out_file\' is not set until to_netcdf() is called')
-        return self._out_file
+    def upvp_trans(self): return self._upvp_trans
+    @property
+    def upwapp_trans(self): return self._upwapp_trans
+    @property
+    def vptp_trans(self): return self._vptp_trans
     
     def vtem(self): return self._zm_return_func(self._vtem())
     def omegatem(self): return self._zm_return_func(self._omegatem())
@@ -620,12 +646,16 @@ class TEMDiagnostics:
     def utendepfd(self): return self._zm_return_func(self._utendepfd())
     def utendvtem(self): return self._zm_return_func(self._utendvtem())
     def utendwtem(self): return self._zm_return_func(self._utendwtem())
+    # ------ tracer functions
     def etfy(self, qi=None): return self._zm_return_func(self._etfy(qi))
     def etfz(self, qi=None): return self._zm_return_func(self._etfz(qi))
     def etdiv(self, qi=None): return self._zm_return_func(self._etdiv(qi))
     def qtendetfd(self, qi=None): return self._zm_return_func(self._qtendetfd(qi))
     def qtendvtem(self, qi=None): return self._zm_return_func(self._qtendvtem(qi))
     def qtendwtem(self, qi=None): return self._zm_return_func(self._qtendwtem(qi))
+    # ------ spectral transform functions
+    def epfy_trans(self): return self._zm_return_func(self._epfy_trans())
+    def epfz_trans(self): return self._zm_return_func(self._epfz_trans())
 
     # --------------------------------------------------
     
@@ -758,6 +788,125 @@ class TEMDiagnostics:
             self._qbcoslat[i].name       = 'dqbcoslat'
             self._dqbcoslat_dlat[i]      = lat_gradient(self._qbcoslat[i], np.deg2rad(self.lat))
             self._dqbcoslat_dlat[i].name = 'dqbcoslat_dlat'
+
+    # -------------------------------------------------- 
+
+    def _compute_transform_zm(self, t1, t2, lat1, lat2):
+        '''
+        Transforms zonal means to frequency space over a time window [t1, t2] and 
+        a latitude band [lat1, lat2]
+
+        Parameters
+        ----------
+        t1 : float
+            left bound of the time window
+        t2 : float
+            right bound of the time window
+        lat1 : float
+            southern bound of the latitude band
+        lat2 : float
+            northern bound of the latitude band
+
+        Returns
+        -------
+        transform : xarray Dataset
+            Dataset containing DataArrays for each of the transformed variables for the
+            specified (time,lat) subset, including: ub_trans, vb_trans, thetab_trans, wapb_trans, 
+            as well as q[i]b_trans for each tracer i
+        '''
+        self._logger.print('computing spectral transform of zonal means for '\
+                           't=[{},{}], lat=[{},{}]...'.format(t1, t2, lat1, lat2))
+
+        # check specified data subset
+        assert t2 > t1, 'time bounds must satisfy t2 > t1'
+        assert lat2 > lat1, 'lat band bounds must satisfy lat2 > lat1'
+        ss = {'time':slice(t1, t2), 'lat':[slice(lat1, lat2)}
+       
+        # do transforms
+        ub_trans          = spec.wave_spectrum_1d(self._ub.sel(ss)).transform()
+        ub_trans.name     = 'ub_trans'
+        vb_trans          = spec.wave_spectrum_1d(self._vb.sel(ss)).transform()
+        vb_trans.name     = 'vb_trans'
+        thetab_trans      = spec.wave_spectrum_1d(self._thetab.sel(ss)).transform()
+        thetab_trans.name = 'thetab_trans'
+        wapb_trans        = spec.wave_spectrum_1d(self._wapb.sel(ss)).transform()
+        wapb_trans.name   = 'wapb_trans'
+
+        # merge DataArrays to Dataset
+        transform = xr.merge(ub_trans, vb_trans, thetab_trans, wapb_trans)
+       
+        # do tracer transforms if present
+        if(self.ntrac > 0):
+            self._logger.print('computing spectral transform of tracer zonal means...')
+            
+            for i in range(self.ntrac): 
+                qb_trans       = spec.wave_spectrum_1d(self._qb[i].sel(ss)).transform()
+                qb_trans.name  = 'q{}b_trans'.format(i)
+                transform = xr.merge(transform, qb_trans)
+
+        return transform
+    
+    # -------------------------------------------------- 
+
+    def _compute_transform_fluxes(self, t1, t2, lat1, lat2):
+        '''
+        Computes momentum and potential temperature fluxes in (wavenumber, frequency) space
+        over the time domain [t1, t2] and latitude band [lat1, lat2].
+        If the 2D Fourier transform of u and v is U and V, respectively, then the flux
+        uv in Fourcer space is the cospectrum UV*, where V* is the complex conjugate of V.
+        
+        Parameters
+        ----------
+        t1 : float
+            left bound of the time window
+        t2 : float
+            right bound of the time window
+        lat1 : float
+            southern bound of the latitude band
+        lat2 : float
+            northern bound of the latitude band
+
+        Returns
+        -------
+        transform : xarray Dataset
+            Dataset containing DataArrays for each of the transformed variables for the
+            specified (time,lat) subset, including: upvp_trans, upwapp_trans, vptp_trans,
+            psi_trans, as well as q[i]pvp_trans and q[i]pwapp_trans for each tracer i
+        '''
+        self._logger.print('computing spectral transform fluxes for '\
+                           't=[{},{}], lat=[{},{}]...'.format(t1, t2, lat1, lat2))
+        
+        # check specified data subset
+        assert t2 > t1, 'time bounds must satisfy t2 > t1'
+        assert lat2 > lat1, 'lat band bounds must satisfy lat2 > lat1'
+        ss = {'time':slice(t1, t2), 'lat':[slice(lat1, lat2)}
+        
+        # do transforms
+        upvp_trans        = spec.cospectrum(self._up.sel(ss), self._vp.sel(ss))
+        upvp_trans.name   = 'upvp_trans'
+        upwapp_trans      = spec.cospectrum(self._up.sel(ss), self._vp.sel(ss))
+        upwapp_trans.name = 'upwapp_trans'
+        vptp_trans        = spec.cospectrum(self._vp.sel(ss), self._thetap.sel(ss))
+        vptp_trans.name   = 'vptp_trans'
+        
+        # get transformed form of psi
+        self._psi_trans = vptp_trans / self._dthetab_dp
+
+        # merge DataArrays to Dataset
+        transform = xr.merge(upvp_trans, upwapp_trans, vptp_trans, vptp_trans)
+
+        # do tracer transforms if present
+        if(self.ntrac > 0):
+            self._logger.print('computing tracer fluxes and tracer flux zonal means...') 
+            if(self.q_misshapen):
+                raise RuntimeError('Cannot compute tracer fluxes when q_misshapen = True')
+            
+            for i in range(self.ntrac): 
+                qpvp_trans         = spec.cospectrum(self._qp[i].sel(ss), self._vp.sel(ss))
+                qpvp_trans.name    = 'q{}pvp_trans'.format(i)
+                qpwapp_trans       = spec.cospectrum(self._qp[i].sel(ss), self._wapp.sel(ss))
+                qpwapp_trans.name  = 'q{}pwapp_trans'.format(i)
+                transform = xr.merge(transform, qpvp_trans, qpwapp_trans)
 
     # --------------------------------------------------
 
@@ -910,6 +1059,40 @@ class TEMDiagnostics:
         utendwtem = -wstar * self._dub_dp
         utendwtem.name = 'utendwtem'
         return utendwtem
+    
+    # --------------------------------------------------
+    
+    def _epfy_trans(self):
+        '''
+        Returns the northward component of the EP flux in m3/s2, in log-pressure coordinate, 
+        in spectral (wavenumber, frequency) space. Specifically, this is Eq. 2 of 
+        Krimser & Giorgetta (2014)
+        '''
+        self._logger.print('computing epfy transform...')
+        
+        x    = self._multiply_lat(self._dub_dp * self._psi_trans - self._upvp_trans, a*self.coslat)
+        epfy_trans = self._multiply_pres(x, self.p/self.p0)
+        epfy_trans.name = 'epfy_trans'
+        return epfy_trans
+    
+    # --------------------------------------------------
+
+    def _epfz_trans(self):
+        '''
+        Returns the upward component of the EP flux in m3/s2, in log-pressure coodinate, 
+        in spectral (wavenumber, frequency) space. Specifically, this is Eq. 3 of 
+        Krimser & Giorgetta (2014)
+        '''
+        self._logger.print('computing epfz transform...')
+        
+        if(self._ptype == 'var'): f = self.f
+        else: f = self.f[:, np.newaxis, np.newaxis]
+
+        x    = f - self._multiply_lat(self._dubcoslat_dlat, 1/(a*self.coslat))
+        epfz_trans = -H/self.p0 * self._multiply_lat((x*self._psi_trans - self._upwapp_trans), 
+                                                     a*self.coslat)
+        epfz_trans.name = 'epfz_trans'
+        return epfz_trans
 
     # --------------------------------------------------
     
@@ -1105,6 +1288,87 @@ class TEMDiagnostics:
         qtendwtem.name = 'qtendwtem'
         return qtendwtem
 
+    # --------------------------------------------------    
+
+    def _etfy_trans(self, qi=None):
+        '''
+        Returns the northward component of the eddy tracer flux in m2/s, in log-pressure 
+        coordinate, in spectral (wafvenumer, frequency) space
+
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
+        '''
+        self._logger.print('computing etfy_trans...')
+        
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+                  'qi must be passed to etfy_trans() when len(q) > 1!')
+
+        if(self.q_misshapen):
+            raise RuntimeError('Cannot compute etfy_trans when q_misshapen = True')
+
+        x    = self._multiply_lat(dqb_dp * self._psi_trans - self.qpvp_trans[qi], a*self.coslat)
+        etfy_trans = self._multiply_pres(x, self.p/self.p0)
+        etfy_trans.name = 'etfy_trans'
+        return etfy_trans
+    
+    # --------------------------------------------------
+
+    def _etfz_trans(self, qi=None):
+        '''
+        Returns the upward component of the eddy tracer flux in m2/s, in log-pressure 
+        coordinate, in spectral (wavenumber, frequency) space
+        
+        Parameters
+        ----------
+        qi : int, optional
+            Tracer index to use for computation. qi=0 will return the result for
+            the tracer at q[0]. Must be passed if q includes more than one tracer.
+        '''
+        self._logger.print('computing etfz_trans...')
+        
+        if(qi is None and self.ntrac == 1): qi = 0
+        elif(qi is None and self.ntrac > 1): raise RuntimeError(
+                  'qi must be passed to etfz_trans() when len(q) > 1!')
+        
+        if(self._ptype == 'var'): f = self.f
+        else: f = self.f[:, np.newaxis, np.newaxis]
+
+        if(self.q_misshapen):
+            raise RuntimeError('Cannot compute etfz_trans when q_misshapen = True')
+
+        x    = -self._multiply_lat(dqbcoslat_dlat, 1/(a*self.coslat))
+        etfz_trans = -H/self.p0 * self._multiply_lat((x * self._psi_trans - self._qpwapp_trans), 
+                                                     a*self.coslat)
+        etfz_trans.name = 'etfz_trans'
+        return etfz_trans
+    
+    # --------------------------------------------------
+    
+    def spectral_analysis(self, window_width=90, window_overlap=30, ftaper=0.1)
+        '''
+        Performs fourier transformations of the data to obtain 2-dimensional power spectra
+        in frequency and wavenumber for atmospheric variables, and EP flux components, by
+        calling self._compute_transform_zm() and self._compute_transform_fluxes()
+
+        Parameters
+        ----------
+        lat_band : list of float
+            bounds of latitude band over which to apply the transformation
+        window_width : int, optional
+            Width of temporal window to use for the spectral analysis, in number of days.
+            A power spectrum will be produced for every time period of length 
+            (window_width-window_overlap) in the data. Default is 90 days.
+        window_overlap : int, optional
+            Width of temporal window overlaps, in number of days. Default is 30 days.
+        ftaper : float, optional
+            The fraction of the data that's used for tapering the data in time.
+            ftaper/2 will be tapered at each end. Default is 0.1.
+        '''
+    
     # --------------------------------------------------
 
     def to_netcdf(self, loc=os.getcwd(), prefix=None, include_attrs=False):

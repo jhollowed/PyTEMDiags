@@ -284,7 +284,7 @@ def format_latlon_data(data, lat_name='lat', lon_name='lon',
     This function allows users to compute TEM quantities with the PyTEMDiags 
     package on structured lat-lon datasets. This package computes 
     zonal averages via a spherical-harmonic method generalized for unstructred 
-    data, and so in order to use it with structured lat-lon data, the data must 
+./pre_analyzer/vis_plume_column.py  data, and so in order to use it with structured lat-lon data, the data must 
     first be re-formatted in a way that reduces the two lat,lon horizontal 
     dimensions to a single unstructured dimension.
     If the data in the two original structured horizontal 
